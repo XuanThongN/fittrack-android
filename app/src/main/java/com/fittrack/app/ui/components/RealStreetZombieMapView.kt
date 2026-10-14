@@ -1,14 +1,16 @@
 package com.fittrack.app.ui.components
 
-import android.annotation.SuppressLint
-import android.webkit.WebChromeClient
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.drawable.BitmapDrawable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,9 +28,9 @@ import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -50,12 +53,19 @@ import com.fittrack.app.ui.theme.DangerRed
 import com.fittrack.app.ui.theme.DarkBackground
 import com.fittrack.app.ui.theme.EmeraldPrimary
 import com.fittrack.app.ui.theme.OrangeBurn
+import org.osmdroid.config.Configuration
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.Polyline
+import java.io.File
 
 /**
- * RealStreetZombieMapView: High-detail real-world street map (CartoDB Voyager + OSM & ESRI Satellite)
- * with animated Runner pin and real-world Zombie Horde pursuing along actual streets and roads.
+ * 100% Native OpenStreetMap View powered by osmdroid.
+ * Renders real OpenStreetMap tiles (Mapnik with Vietnamese road names & OpenTopo) directly
+ * on Android hardware canvas with ZERO WebView bugs, 60 FPS scrolling, and native markers.
  */
-@SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun RealStreetZombieMapView(
     pathPoints: List<Pair<Double, Double>>,
@@ -63,309 +73,166 @@ fun RealStreetZombieMapView(
     zombieState: ZombieChaseState,
     modifier: Modifier = Modifier
 ) {
-    val webViewRef = remember { mutableMapOf<String, WebView?>() }
-    var isSatellite by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    var isTopoLayer by remember { mutableStateOf(false) }
 
-    // Default to landmark if GPS hasn't locked yet (e.g. 10.7769, 106.7009 Ho Chi Minh City center)
     val defaultLat = currentLocation?.first ?: 10.7769
     val defaultLng = currentLocation?.second ?: 106.7009
 
-    val html = remember {
-        """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8" />
-            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-            <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-            <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-            <style>
-                html, body, #map {
-                    width: 100%;
-                    height: 100%;
-                    margin: 0;
-                    padding: 0;
-                    background: #0F172A;
-                    overflow: hidden;
-                }
-                .leaflet-control-attribution { display: none !important; }
-                
-                @keyframes pulseGlow {
-                    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.8); }
-                    70% { transform: scale(1.08); box-shadow: 0 0 0 16px rgba(6, 182, 212, 0); }
-                    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(6, 182, 212, 0); }
-                }
-                
-                @keyframes zombieHop {
-                    0% { transform: translateY(0px) rotate(-5deg) scale(1); }
-                    50% { transform: translateY(-7px) rotate(5deg) scale(1.05); }
-                    100% { transform: translateY(0px) rotate(-5deg) scale(1); }
-                }
-
-                .runner-marker {
-                    background: #06B6D4;
-                    color: white;
-                    border: 3px solid #FFFFFF;
-                    border-radius: 50%;
-                    width: 36px;
-                    height: 36px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    font-size: 20px;
-                    animation: pulseGlow 1.8s infinite;
-                    box-shadow: 0 4px 14px rgba(6, 182, 212, 0.9);
-                }
-
-                .runner-label {
-                    background: rgba(15, 23, 42, 0.85);
-                    color: #06B6D4;
-                    font-weight: 800;
-                    font-size: 10px;
-                    padding: 2px 6px;
-                    border-radius: 6px;
-                    border: 1px solid #06B6D4;
-                    white-space: nowrap;
-                    margin-top: 2px;
-                    text-align: center;
-                }
-
-                .zombie-marker {
-                    background: #EF4444;
-                    color: white;
-                    border: 2px solid #FFFFFF;
-                    border-radius: 50%;
-                    width: 32px;
-                    height: 32px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    font-size: 18px;
-                    animation: zombieHop 0.55s infinite alternate;
-                    box-shadow: 0 4px 14px rgba(239, 68, 68, 0.9);
-                }
-
-                .zombie-label {
-                    background: rgba(239, 68, 68, 0.9);
-                    color: #FFFFFF;
-                    font-weight: 800;
-                    font-size: 9px;
-                    padding: 1px 4px;
-                    border-radius: 4px;
-                    white-space: nowrap;
-                    margin-top: 1px;
-                    text-align: center;
-                }
-
-                .start-marker {
-                    background: #10B981;
-                    color: white;
-                    border: 2px solid #FFFFFF;
-                    border-radius: 50%;
-                    width: 28px;
-                    height: 28px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    font-size: 14px;
-                    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.6);
-                }
-            </style>
-        </head>
-        <body>
-            <div id="map"></div>
-            <script>
-                var map = null;
-                var streetLayer = null;
-                var satLayer = null;
-                var runnerMarker = null;
-                var startMarker = null;
-                var zombieMarkers = [];
-                var routePolyline = null;
-                var hasAutoCentered = false;
-
-                function initMap(lat, lng) {
-                    if (map) return;
-                    map = L.map('map', { 
-                        zoomControl: false,
-                        touchZoom: true,
-                        dragging: true
-                    }).setView([lat, lng], 17);
-
-                    // High-resolution real-world street tiles with Vietnamese road & street names
-                    streetLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-                        maxZoom: 20,
-                        subdomains: 'abcd'
-                    }).addTo(map);
-
-                    // ESRI Satellite Imagery layer
-                    satLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                        maxZoom: 19
-                    });
-
-                    // Running Polyline route with high-visibility cyan neon glow
-                    routePolyline = L.polyline([], {
-                        color: '#06B6D4',
-                        weight: 6,
-                        opacity: 0.95,
-                        lineJoin: 'round',
-                        lineCap: 'round'
-                    }).addTo(map);
-
-                    // Draw runner at start pos
-                    setRunnerPosition(lat, lng);
-                }
-
-                function setRunnerPosition(lat, lng) {
-                    if (!map) return;
-                    var pos = [lat, lng];
-
-                    if (!runnerMarker) {
-                        var icon = L.divIcon({
-                            className: '',
-                            html: '<div style="display:flex;flex-direction:column;align-items:center;"><div class="runner-marker">🏃</div><div class="runner-label">BẠN</div></div>',
-                            iconSize: [44, 52],
-                            iconAnchor: [22, 26]
-                        });
-                        runnerMarker = L.marker(pos, { icon: icon, zIndexOffset: 1000 }).addTo(map);
-                    } else {
-                        runnerMarker.setLatLng(pos);
-                    }
-                }
-
-                function updateRunnerAndZombies(pathJson, curLat, curLng, zombieDistMeters, isZombieActive) {
-                    var lat = (curLat !== null && curLat !== undefined) ? curLat : $defaultLat;
-                    var lng = (curLng !== null && curLng !== undefined) ? curLng : $defaultLng;
-
-                    if (!map) {
-                        initMap(lat, lng);
-                    }
-
-                    try {
-                        var pts = JSON.parse(pathJson);
-                        if (pts && pts.length > 0) {
-                            routePolyline.setLatLngs(pts);
-
-                            if (!startMarker && pts.length >= 1) {
-                                var sIcon = L.divIcon({
-                                    className: '',
-                                    html: '<div class="start-marker">🚩</div>',
-                                    iconSize: [28, 28],
-                                    iconAnchor: [14, 14]
-                                });
-                                startMarker = L.marker(pts[0], { icon: sIcon }).addTo(map);
-                            }
-                        }
-
-                        setRunnerPosition(lat, lng);
-
-                        if (!hasAutoCentered) {
-                            map.setView([lat, lng], 17);
-                            hasAutoCentered = true;
-                        }
-
-                        // UPDATE ZOMBIES POSITION ON THE REAL STREET!
-                        updateZombies(lat, lng, pts, zombieDistMeters, isZombieActive);
-                    } catch(e) {
-                        console.error("Map update error:", e);
-                    }
-                }
-
-                function updateZombies(curLat, curLng, pts, distMeters, isZombieActive) {
-                    // Remove old zombie markers
-                    for (var i = 0; i < zombieMarkers.length; i++) {
-                        map.removeLayer(zombieMarkers[i]);
-                    }
-                    zombieMarkers = [];
-
-                    if (!isZombieActive) return;
-
-                    // Calculate zombie position along real road or offset behind runner
-                    // 1 meter lat is ~ 0.000009 degrees
-                    var latOffset = - (distMeters * 0.000009);
-                    var zLat = curLat + latOffset;
-                    var zLng = curLng;
-
-                    // If we have runner GPS track history, place zombie on real street path behind runner
-                    if (pts && pts.length >= 2) {
-                        var idx = Math.max(0, pts.length - 1 - Math.round(distMeters / 15));
-                        zLat = pts[idx][0];
-                        zLng = pts[idx][1];
-                    }
-
-                    // Tactical 3-zombie chasing formation along the street
-                    var zombieCoords = [
-                        { pos: [zLat, zLng], label: 'Đầu Đàn' },
-                        { pos: [zLat - 0.00012, zLng + 0.00012], label: 'Hộ Vệ' },
-                        { pos: [zLat - 0.00012, zLng - 0.00012], label: 'Đột Biến' }
-                    ];
-
-                    var zIcon = L.divIcon({
-                        className: '',
-                        html: '<div style="display:flex;flex-direction:column;align-items:center;"><div class="zombie-marker">🧟</div><div class="zombie-label">' + Math.round(distMeters) + 'm</div></div>',
-                        iconSize: [36, 46],
-                        iconAnchor: [18, 23]
-                    });
-
-                    for (var j = 0; j < zombieCoords.length; j++) {
-                        var zm = L.marker(zombieCoords[j].pos, { icon: zIcon, zIndexOffset: 500 }).addTo(map);
-                        zombieMarkers.push(zm);
-                    }
-                }
-
-                function toggleLayer(isSat) {
-                    if (!map) return;
-                    if (isSat) {
-                        if (map.hasLayer(streetLayer)) map.removeLayer(streetLayer);
-                        if (!map.hasLayer(satLayer)) satLayer.addTo(map);
-                    } else {
-                        if (map.hasLayer(satLayer)) map.removeLayer(satLayer);
-                        if (!map.hasLayer(streetLayer)) streetLayer.addTo(map);
-                    }
-                }
-
-                function centerOnMe(lat, lng) {
-                    if (!map) return;
-                    if (lat && lng) {
-                        map.setView([lat, lng], 18);
-                    } else if (runnerMarker) {
-                        map.setView(runnerMarker.getLatLng(), 18);
-                    }
-                }
-
-                function zoomIn() {
-                    if (map) map.zoomIn();
-                }
-
-                function zoomOut() {
-                    if (map) map.zoomOut();
-                }
-
-                window.onload = function() {
-                    initMap($defaultLat, $defaultLng);
-                    updateRunnerAndZombies('[]', $defaultLat, $defaultLng, ${zombieState.distanceMeters}, ${zombieState.isEnabled});
-                };
-            </script>
-        </body>
-        </html>
-        """.trimIndent()
+    // Initialize osmdroid Configuration
+    remember {
+        Configuration.getInstance().apply {
+            userAgentValue = "FitTrackApp/1.3 (com.fittrack.app; Android)"
+            osmdroidBasePath = File(context.cacheDir, "osmdroid")
+            osmdroidTileCache = File(context.cacheDir, "osmdroid/tiles")
+        }
     }
 
-    // Live update coordinates and zombie chase
+    // Retain native MapView and its overlays
+    val mapView = remember {
+        MapView(context).apply {
+            setTileSource(TileSourceFactory.MAPNIK)
+            setMultiTouchControls(true)
+            isTilesScaledToDpi = true
+            controller.setZoom(17.5)
+            controller.setCenter(GeoPoint(defaultLat, defaultLng))
+        }
+    }
+
+    // Manage MapView Android lifecycle
+    DisposableEffect(mapView) {
+        mapView.onResume()
+        onDispose {
+            mapView.onPause()
+            mapView.onDetach()
+        }
+    }
+
+    // Native Polyline for runner route
+    val routePolyline = remember {
+        Polyline(mapView).apply {
+            outlinePaint.color = android.graphics.Color.parseColor("#06B6D4")
+            outlinePaint.strokeWidth = 14f
+            outlinePaint.strokeCap = Paint.Cap.ROUND
+            outlinePaint.strokeJoin = Paint.Join.ROUND
+        }
+    }
+
+    // Native Marker for Runner
+    val runnerMarker = remember {
+        Marker(mapView).apply {
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            icon = createRunnerMarkerDrawable(context)
+            position = GeoPoint(defaultLat, defaultLng)
+            title = "BẠN"
+        }
+    }
+
+    // Start Pin Marker
+    val startMarker = remember {
+        Marker(mapView).apply {
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+            icon = createStartFlagDrawable(context)
+            title = "Điểm Xuất Phát"
+        }
+    }
+
+    // 3 Native Zombie Markers
+    val zombieLeadMarker = remember {
+        Marker(mapView).apply {
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            title = "Zombie Đầu Đàn"
+        }
+    }
+    val zombieFlank1Marker = remember {
+        Marker(mapView).apply {
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            title = "Zombie Hộ Vệ"
+        }
+    }
+    val zombieFlank2Marker = remember {
+        Marker(mapView).apply {
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            title = "Zombie Đột Biến"
+        }
+    }
+
+    // Ensure persistent overlays are attached
+    LaunchedEffect(mapView) {
+        if (!mapView.overlays.contains(routePolyline)) {
+            mapView.overlays.add(routePolyline)
+        }
+        if (!mapView.overlays.contains(runnerMarker)) {
+            mapView.overlays.add(runnerMarker)
+        }
+    }
+
+    // Switch Tile Source (Mapnik Standard Street vs OpenTopo)
+    LaunchedEffect(isTopoLayer) {
+        if (isTopoLayer) {
+            mapView.setTileSource(TileSourceFactory.OpenTopo)
+        } else {
+            mapView.setTileSource(TileSourceFactory.MAPNIK)
+        }
+        mapView.invalidate()
+    }
+
+    // Live update coordinates, route, and zombies
     LaunchedEffect(pathPoints, currentLocation, zombieState.distanceMeters, zombieState.isEnabled) {
-        val wv = webViewRef["wv"] ?: return@LaunchedEffect
-        val pointsJson = pathPoints.joinToString(prefix = "[", postfix = "]") { "[${it.first}, ${it.second}]" }
         val curLat = currentLocation?.first ?: defaultLat
         val curLng = currentLocation?.second ?: defaultLng
-        val distM = zombieState.distanceMeters
-        val zActive = zombieState.isEnabled
-        wv.evaluateJavascript("updateRunnerAndZombies('$pointsJson', $curLat, $curLng, $distM, $zActive);", null)
-    }
+        val runnerGeo = GeoPoint(curLat, curLng)
 
-    // Live update layer toggle
-    LaunchedEffect(isSatellite) {
-        val wv = webViewRef["wv"] ?: return@LaunchedEffect
-        wv.evaluateJavascript("toggleLayer($isSatellite);", null)
+        // Update runner position
+        runnerMarker.position = runnerGeo
+
+        // Update route polyline
+        if (pathPoints.isNotEmpty()) {
+            val geoPoints = pathPoints.map { GeoPoint(it.first, it.second) }
+            routePolyline.setPoints(geoPoints)
+
+            // Draw start flag at first point
+            startMarker.position = GeoPoint(pathPoints.first().first, pathPoints.first().second)
+            if (!mapView.overlays.contains(startMarker)) {
+                mapView.overlays.add(startMarker)
+            }
+        }
+
+        // Update Zombie Horde
+        if (zombieState.isEnabled) {
+            val distM = zombieState.distanceMeters.coerceAtLeast(1.0)
+            val distRounded = (distM / 5).toInt() * 5
+
+            // Position zombies along real street path behind runner
+            var zLat = curLat - (distM * 0.000009)
+            var zLng = curLng
+
+            if (pathPoints.size >= 2) {
+                val backStep = (distM / 15).toInt().coerceAtMost(pathPoints.size - 1)
+                val targetIdx = (pathPoints.size - 1 - backStep).coerceAtLeast(0)
+                zLat = pathPoints[targetIdx].first
+                zLng = pathPoints[targetIdx].second
+            }
+
+            zombieLeadMarker.position = GeoPoint(zLat, zLng)
+            zombieLeadMarker.icon = createZombieMarkerDrawable(context, distRounded)
+
+            zombieFlank1Marker.position = GeoPoint(zLat - 0.00012, zLng + 0.00012)
+            zombieFlank1Marker.icon = createZombieMarkerDrawable(context, (distRounded + 4))
+
+            zombieFlank2Marker.position = GeoPoint(zLat - 0.00012, zLng - 0.00012)
+            zombieFlank2Marker.icon = createZombieMarkerDrawable(context, (distRounded + 8))
+
+            if (!mapView.overlays.contains(zombieLeadMarker)) mapView.overlays.add(zombieLeadMarker)
+            if (!mapView.overlays.contains(zombieFlank1Marker)) mapView.overlays.add(zombieFlank1Marker)
+            if (!mapView.overlays.contains(zombieFlank2Marker)) mapView.overlays.add(zombieFlank2Marker)
+        } else {
+            mapView.overlays.remove(zombieLeadMarker)
+            mapView.overlays.remove(zombieFlank1Marker)
+            mapView.overlays.remove(zombieFlank2Marker)
+        }
+
+        mapView.invalidate()
     }
 
     Box(
@@ -375,29 +242,9 @@ fun RealStreetZombieMapView(
             .clip(RoundedCornerShape(22.dp))
             .background(CardSurface)
     ) {
+        // Native OpenStreetMap View
         AndroidView(
-            factory = { ctx ->
-                WebView(ctx).apply {
-                    settings.apply {
-                        javaScriptEnabled = true
-                        domStorageEnabled = true
-                        databaseEnabled = true
-                        allowContentAccess = true
-                        allowFileAccess = true
-                        loadWithOverviewMode = true
-                        useWideViewPort = true
-                        setSupportZoom(true)
-                        builtInZoomControls = true
-                        displayZoomControls = false
-                        cacheMode = WebSettings.LOAD_DEFAULT
-                        mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                    }
-                    webChromeClient = WebChromeClient()
-                    webViewClient = WebViewClient()
-                    loadDataWithBaseURL("https://basemaps.cartocdn.com", html, "text/html", "UTF-8", null)
-                    webViewRef["wv"] = this
-                }
-            },
+            factory = { mapView },
             modifier = Modifier.fillMaxSize()
         )
 
@@ -412,13 +259,13 @@ fun RealStreetZombieMapView(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Layer switch pill: Street vs Satellite
+                // Layer switch pill: OSM Street vs Topo
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .clip(RoundedCornerShape(10.dp))
                         .background(DarkBackground.copy(alpha = 0.92f))
-                        .clickable { isSatellite = !isSatellite }
+                        .clickable { isTopoLayer = !isTopoLayer }
                         .padding(horizontal = 10.dp, vertical = 6.dp)
                 ) {
                     Icon(
@@ -429,7 +276,7 @@ fun RealStreetZombieMapView(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = if (isSatellite) "Vệ Tinh" else "Đường Phố Thật",
+                        text = if (isTopoLayer) "Địa Hình" else "OpenStreetMap",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
@@ -461,7 +308,7 @@ fun RealStreetZombieMapView(
         }
 
         // Map Control Buttons: Zoom In/Out & My Location
-        androidx.compose.foundation.layout.Column(
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(10.dp),
@@ -474,10 +321,7 @@ fun RealStreetZombieMapView(
                     .size(36.dp)
                     .clip(CircleShape)
                     .background(DarkBackground.copy(alpha = 0.92f))
-                    .clickable {
-                        val wv = webViewRef["wv"]
-                        wv?.evaluateJavascript("zoomIn();", null)
-                    },
+                    .clickable { mapView.controller.zoomIn() },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -494,10 +338,7 @@ fun RealStreetZombieMapView(
                     .size(36.dp)
                     .clip(CircleShape)
                     .background(DarkBackground.copy(alpha = 0.92f))
-                    .clickable {
-                        val wv = webViewRef["wv"]
-                        wv?.evaluateJavascript("zoomOut();", null)
-                    },
+                    .clickable { mapView.controller.zoomOut() },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -511,10 +352,9 @@ fun RealStreetZombieMapView(
             // Recenter My Location FAB
             FloatingActionButton(
                 onClick = {
-                    val wv = webViewRef["wv"]
-                    val lat = currentLocation?.first ?: defaultLat
-                    val lng = currentLocation?.second ?: defaultLng
-                    wv?.evaluateJavascript("centerOnMe($lat, $lng);", null)
+                    val curLat = currentLocation?.first ?: defaultLat
+                    val curLng = currentLocation?.second ?: defaultLng
+                    mapView.controller.animateTo(GeoPoint(curLat, curLng))
                 },
                 modifier = Modifier.size(42.dp),
                 containerColor = CyanRun,
@@ -529,4 +369,113 @@ fun RealStreetZombieMapView(
             }
         }
     }
+}
+
+/**
+ * Creates custom BitmapDrawable for Runner Pin (🏃 BẠN)
+ */
+private fun createRunnerMarkerDrawable(context: Context): BitmapDrawable {
+    val sizePx = 100
+    val bitmap = Bitmap.createBitmap(sizePx, sizePx + 24, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    // Outer cyan glow
+    paint.color = android.graphics.Color.parseColor("#4D06B6D4")
+    canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f, paint)
+
+    // Cyan solid circle
+    paint.color = android.graphics.Color.parseColor("#06B6D4")
+    canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f - 8f, paint)
+
+    // White outline
+    paint.color = android.graphics.Color.WHITE
+    paint.style = Paint.Style.STROKE
+    paint.strokeWidth = 5f
+    canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f - 8f, paint)
+
+    // Runner Emoji
+    paint.style = Paint.Style.FILL
+    paint.textSize = 36f
+    paint.textAlign = Paint.Align.CENTER
+    val fontMetrics = paint.fontMetrics
+    val textY = (sizePx / 2f) - (fontMetrics.ascent + fontMetrics.descent) / 2
+    canvas.drawText("🏃", sizePx / 2f, textY, paint)
+
+    // Badge "BẠN"
+    val pillRect = RectF(sizePx / 2f - 32f, sizePx.toFloat() - 4f, sizePx / 2f + 32f, (sizePx + 22).toFloat())
+    paint.color = android.graphics.Color.parseColor("#E60F172A")
+    canvas.drawRoundRect(pillRect, 6f, 6f, paint)
+
+    paint.color = android.graphics.Color.parseColor("#06B6D4")
+    paint.textSize = 17f
+    paint.isFakeBoldText = true
+    canvas.drawText("BẠN", sizePx / 2f, (sizePx + 15).toFloat(), paint)
+
+    return BitmapDrawable(context.resources, bitmap)
+}
+
+/**
+ * Creates custom BitmapDrawable for Zombie Marker (🧟 XXm)
+ */
+private fun createZombieMarkerDrawable(context: Context, distM: Int): BitmapDrawable {
+    val sizePx = 90
+    val bitmap = Bitmap.createBitmap(sizePx, sizePx + 22, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    // Outer red glow
+    paint.color = android.graphics.Color.parseColor("#4DEF4444")
+    canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f, paint)
+
+    // Red solid circle
+    paint.color = android.graphics.Color.parseColor("#EF4444")
+    canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f - 6f, paint)
+
+    // White outline
+    paint.color = android.graphics.Color.WHITE
+    paint.style = Paint.Style.STROKE
+    paint.strokeWidth = 4f
+    canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f - 6f, paint)
+
+    // Zombie Emoji
+    paint.style = Paint.Style.FILL
+    paint.textSize = 32f
+    paint.textAlign = Paint.Align.CENTER
+    val fontMetrics = paint.fontMetrics
+    val textY = (sizePx / 2f) - (fontMetrics.ascent + fontMetrics.descent) / 2
+    canvas.drawText("🧟", sizePx / 2f, textY, paint)
+
+    // Badge distance (e.g. "80m")
+    val pillRect = RectF(sizePx / 2f - 30f, sizePx.toFloat() - 4f, sizePx / 2f + 30f, (sizePx + 20).toFloat())
+    paint.color = android.graphics.Color.parseColor("#EF4444")
+    canvas.drawRoundRect(pillRect, 6f, 6f, paint)
+
+    paint.color = android.graphics.Color.WHITE
+    paint.textSize = 16f
+    paint.isFakeBoldText = true
+    canvas.drawText("${distM}m", sizePx / 2f, (sizePx + 14).toFloat(), paint)
+
+    return BitmapDrawable(context.resources, bitmap)
+}
+
+/**
+ * Creates Start Flag Drawable (🚩)
+ */
+private fun createStartFlagDrawable(context: Context): BitmapDrawable {
+    val sizePx = 64
+    val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = 34f
+        textAlign = Paint.Align.CENTER
+    }
+    val fontMetrics = paint.fontMetrics
+    val textY = (sizePx / 2f) - (fontMetrics.ascent + fontMetrics.descent) / 2
+    canvas.drawText("🚩", sizePx / 2f, textY, paint)
+
+    return BitmapDrawable(context.resources, bitmap)
 }
