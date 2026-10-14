@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Lightning / Running silhouette symbol in neon emerald -->
+    <path
+        android:fillColor="#10B981"
+        android:pathData="M54,20 C40,20 28,32 28,46 C28,58 35,68 45,71 L45,86 L63,86 L63,71 C73,68 80,58 80,46 C80,32 68,20 54,20 Z M54,28 C64,28 72,36 72,46 C72,55 65,62 55,63 L53,63 C43,62 36,55 36,46 C36,36 44,28 54,28 Z" />
+    <path
+        android:fillColor="#F97316"
+        android:pathData="M51,35 L43,51 L52,51 L48,65 L61,48 L53,48 Z" />
+</vector>
