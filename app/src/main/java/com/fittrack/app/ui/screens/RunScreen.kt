@@ -79,6 +79,7 @@ import com.fittrack.app.data.model.ZombieChaseState
 import com.fittrack.app.data.model.ZombieDifficulty
 import com.fittrack.app.service.FitTrackVoiceCoach
 import com.fittrack.app.service.LocationTracker
+import com.fittrack.app.ui.components.RealStreetZombieMapView
 import com.fittrack.app.ui.components.ZombieRadarMap
 import com.fittrack.app.ui.theme.CardSurface
 import com.fittrack.app.ui.theme.CyanLight
@@ -136,6 +137,7 @@ fun RunScreen(
     val avgPaceSecPerKm = if (distanceKm > 0.05) (elapsedSeconds / distanceKm).toLong() else 0L
 
     var showManualDialog by remember { mutableStateOf(false) }
+    var mapMode by remember { mutableStateOf("street") }
 
     // ZOMBIE CHASE STATE
     var zombieState by remember { mutableStateOf(ZombieChaseState(isEnabled = true, distanceMeters = 80.0)) }
@@ -284,14 +286,77 @@ fun RunScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // 100% RELIABLE HIGH-TECH NATIVE RADAR GPS MAP (With Zombies chasing!)
-        ZombieRadarMap(
-            pathPoints = pathPoints,
-            currentLocation = currentLocation,
-            zombieState = zombieState,
-            runnerSpeedKmh = runnerSpeedKmh,
-            modifier = Modifier.fillMaxWidth()
-        )
+        // Map Mode Switcher: Real Street (Đường Phố Thật) vs Tactical Radar (Radar Tác Chiến)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(CardSurface)
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (mapMode == "street") CyanRun else Color.Transparent)
+                    .clickable { mapMode = "street" }
+                    .padding(vertical = 7.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = "🗺️", fontSize = 13.sp)
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text(
+                        text = "Đường Phố Thật",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (mapMode == "street") DarkBackground else TextPrimary
+                    )
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (mapMode == "radar") DangerRed else Color.Transparent)
+                    .clickable { mapMode = "radar" }
+                    .padding(vertical = 7.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = "📡", fontSize = 13.sp)
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text(
+                        text = "Radar Tác Chiến",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (mapMode == "radar") Color.White else TextPrimary
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Display selected Map View
+        if (mapMode == "street") {
+            RealStreetZombieMapView(
+                pathPoints = pathPoints,
+                currentLocation = currentLocation,
+                zombieState = zombieState,
+                modifier = Modifier.fillMaxWidth()
+            )
+        } else {
+            ZombieRadarMap(
+                pathPoints = pathPoints,
+                currentLocation = currentLocation,
+                zombieState = zombieState,
+                runnerSpeedKmh = runnerSpeedKmh,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
 
         Spacer(modifier = Modifier.height(12.dp))
 
