@@ -1,10 +1,10 @@
 package com.fittrack.app.ui.screens
 
 import android.Manifest
-import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DirectionsRun
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Speed
@@ -60,11 +61,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
 import com.fittrack.app.data.db.FitTrackRepository
 import com.fittrack.app.data.model.RunSession
 import com.fittrack.app.service.LocationTracker
-import com.fittrack.app.ui.components.StatCard
+import com.fittrack.app.ui.components.RunningMapView
 import com.fittrack.app.ui.theme.CardSurface
 import com.fittrack.app.ui.theme.CyanLight
 import com.fittrack.app.ui.theme.CyanRun
@@ -98,6 +98,9 @@ fun RunScreen(
     var manualDistanceMeters by remember { mutableDoubleStateOf(0.0) }
 
     val gpsDistanceMeters by locationTracker.distanceMeters.collectAsState()
+    val pathPoints by locationTracker.pathPoints.collectAsState()
+    val currentLocation by locationTracker.currentLocation.collectAsState()
+
     val totalDistanceMeters = if (gpsDistanceMeters > 0) gpsDistanceMeters else manualDistanceMeters
     val distanceKm = totalDistanceMeters / 1000.0
 
@@ -108,6 +111,7 @@ fun RunScreen(
     val avgPaceSecPerKm = if (distanceKm > 0.05) (elapsedSeconds / distanceKm).toLong() else 0L
 
     var showManualDialog by remember { mutableStateOf(false) }
+    var showMapToggle by remember { mutableStateOf(true) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -154,7 +158,7 @@ fun RunScreen(
                     color = TextPrimary
                 )
                 Text(
-                    text = "Đo quãng đường GPS, tốc độ pace & calo",
+                    text = "Bản đồ GPS trực tiếp, lộ trình & tốc độ",
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextSecondary
                 )
@@ -176,22 +180,67 @@ fun RunScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        // ACTIVE DASHBOARD CARD
+        // REAL-TIME GPS MAP VIEW
+        if (showMapToggle) {
+            RunningMapView(
+                pathPoints = pathPoints,
+                currentLocation = currentLocation,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        // METRICS DASHBOARD CARD
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = CardSurface),
             shape = RoundedCornerShape(22.dp)
         ) {
             Column(
-                modifier = Modifier.padding(20.dp),
+                modifier = Modifier.padding(18.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "QUÃNG ĐƯỜNG",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextMuted,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(DarkBackground)
+                            .clickable { showMapToggle = !showMapToggle }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Map,
+                            contentDescription = null,
+                            tint = CyanRun,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (showMapToggle) "Ẩn bản đồ" else "Hiện bản đồ",
+                            fontSize = 11.sp,
+                            color = TextSecondary
+                        )
+                    }
+                }
+
                 // DISTANCE DISPLAY
                 Text(
                     text = String.format(Locale.US, "%.2f", distanceKm),
-                    fontSize = 56.sp,
+                    fontSize = 48.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = CyanLight
                 )
@@ -202,7 +251,7 @@ fun RunScreen(
                     color = TextMuted
                 )
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // STATS ROW (TIME, PACE, CALORIES)
                 Row(
@@ -265,7 +314,7 @@ fun RunScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(22.dp))
+                Spacer(modifier = Modifier.height(18.dp))
 
                 // CONTROLS
                 if (!isRunning) {
@@ -378,7 +427,7 @@ fun RunScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(18.dp))
 
         // RUN HISTORY LIST
         Text(
@@ -493,79 +542,5 @@ fun RunScreen(
                 }
             }
         )
-    }
-}
-
-@Composable
-fun RunHistoryItem(run: RunSession) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = CardSurface),
-        shape = RoundedCornerShape(16.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(CyanRun.copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = if (run.isGpsTracked) Icons.Default.LocationOn else Icons.Default.DirectionsRun,
-                        contentDescription = null,
-                        tint = CyanRun,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(12.dp))
-
-                Column {
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        Text(
-                            text = run.distanceKmFormatted(),
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = run.durationFormatted(),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextSecondary,
-                            modifier = Modifier.padding(bottom = 2.dp)
-                        )
-                    }
-
-                    Text(
-                        text = "${run.getFormattedDate()} • Pace: ${run.paceFormatted()}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextMuted
-                    )
-                }
-            }
-
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = run.caloriesFormatted(),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = OrangeBurn
-                )
-                Text(
-                    text = if (run.isGpsTracked) "GPS Run" else "Treadmill",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextMuted
-                )
-            }
-        }
     }
 }

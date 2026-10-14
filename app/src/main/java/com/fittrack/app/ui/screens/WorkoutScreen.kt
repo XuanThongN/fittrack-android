@@ -1,7 +1,6 @@
 package com.fittrack.app.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,8 +45,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.fittrack.app.data.db.FitTrackRepository
 import com.fittrack.app.data.model.DefaultWorkoutData
+import com.fittrack.app.data.model.WorkoutExercise
 import com.fittrack.app.data.model.WorkoutPlan
 import com.fittrack.app.data.model.WorkoutSession
+import com.fittrack.app.ui.components.ExerciseVisualGuide
 import com.fittrack.app.ui.theme.CardSurface
 import com.fittrack.app.ui.theme.DarkBackground
 import com.fittrack.app.ui.theme.EmeraldPrimary
@@ -63,6 +64,7 @@ fun WorkoutScreen(
 ) {
     val workouts by repository.workoutSessions.collectAsState()
     var selectedPlanForDetails by remember { mutableStateOf<WorkoutPlan?>(null) }
+    var inspectingExercise by remember { mutableStateOf<WorkoutExercise?>(null) }
 
     Column(
         modifier = Modifier
@@ -86,7 +88,7 @@ fun WorkoutScreen(
                     color = TextPrimary
                 )
                 Text(
-                    text = "Giáo án HIIT & Cardio đốt mỡ tại nhà",
+                    text = "Giáo án HIIT & Hướng dẫn động tác trực quan",
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextSecondary
                 )
@@ -153,7 +155,7 @@ fun WorkoutScreen(
         }
     }
 
-    // EXERCISE DETAILS DIALOG
+    // EXERCISE DETAILS DIALOG WITH VISUAL GUIDES
     selectedPlanForDetails?.let { plan ->
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { selectedPlanForDetails = null },
@@ -169,7 +171,7 @@ fun WorkoutScreen(
             text = {
                 LazyColumn(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     item {
                         Text(
@@ -177,25 +179,25 @@ fun WorkoutScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             color = TextSecondary
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Danh sách ${plan.exercises.size} bài tập trong buổi:",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = EmeraldPrimary
+                            text = "Chạm vào bài tập để xem hướng dẫn trực quan & nhịp thở:",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = OrangeBurn
                         )
                     }
 
                     items(plan.exercises) { ex ->
                         Card(
                             colors = CardDefaults.cardColors(containerColor = DarkBackground),
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
+                            Column(modifier = Modifier.padding(12.dp)) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
                                         text = ex.name,
@@ -213,9 +215,20 @@ fun WorkoutScreen(
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
                                     text = ex.instructions,
-                                    style = MaterialTheme.typography.labelSmall,
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
                                     color = TextMuted
                                 )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(
+                                    onClick = { inspectingExercise = ex },
+                                    colors = ButtonDefaults.buttonColors(containerColor = CardSurface),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.height(36.dp)
+                                ) {
+                                    Icon(imageVector = Icons.Default.Info, contentDescription = null, tint = EmeraldPrimary, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(text = "Xem hình động & kỹ thuật", fontSize = 12.sp, color = EmeraldPrimary)
+                                }
                             }
                         }
                     }
@@ -236,6 +249,26 @@ fun WorkoutScreen(
             dismissButton = {
                 androidx.compose.material3.TextButton(onClick = { selectedPlanForDetails = null }) {
                     Text(text = "Đóng", color = TextSecondary)
+                }
+            }
+        )
+    }
+
+    // INSPECT INDIVIDUAL EXERCISE VISUAL GUIDE DIALOG
+    inspectingExercise?.let { ex ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { inspectingExercise = null },
+            containerColor = CardSurface,
+            title = null,
+            text = {
+                ExerciseVisualGuide(exercise = ex)
+            },
+            confirmButton = {
+                Button(
+                    onClick = { inspectingExercise = null },
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary)
+                ) {
+                    Text(text = "Đã Hiểu", color = DarkBackground, fontWeight = FontWeight.Bold)
                 }
             }
         )
@@ -356,7 +389,7 @@ fun WorkoutPlanCard(
                 ) {
                     Icon(imageVector = Icons.Default.Info, contentDescription = null, tint = TextSecondary)
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text(text = "Xem bài tập", color = TextSecondary)
+                    Text(text = "Xem chi tiết", color = TextSecondary)
                 }
             }
         }

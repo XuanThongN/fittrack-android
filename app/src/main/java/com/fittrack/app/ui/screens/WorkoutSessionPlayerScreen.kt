@@ -5,7 +5,6 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,15 +17,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FastForward
-import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -42,7 +43,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -58,6 +58,8 @@ import androidx.compose.ui.unit.sp
 import com.fittrack.app.data.db.FitTrackRepository
 import com.fittrack.app.data.model.WorkoutPlan
 import com.fittrack.app.data.model.WorkoutSession
+import com.fittrack.app.service.FitTrackVoiceCoach
+import com.fittrack.app.ui.components.AnimatedExerciseCanvas
 import com.fittrack.app.ui.theme.CardSurface
 import com.fittrack.app.ui.theme.DarkBackground
 import com.fittrack.app.ui.theme.EmeraldLight
@@ -71,12 +73,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-enum class WorkoutState {
-    EXERCISING,
-    RESTING,
-    COMPLETED
-}
-
 @Composable
 fun WorkoutSessionPlayerScreen(
     plan: WorkoutPlan,
@@ -84,6 +80,9 @@ fun WorkoutSessionPlayerScreen(
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
+    val voiceCoach = remember { FitTrackVoiceCoach(context) }
+    var isMuted by remember { mutableStateOf(false) }
+
     var currentExerciseIndex by remember { mutableIntStateOf(0) }
     var workoutState by remember { mutableStateOf(WorkoutState.EXERCISING) }
     var isPaused by remember { mutableStateOf(false) }
@@ -117,6 +116,16 @@ fun WorkoutSessionPlayerScreen(
         } catch (_: Exception) {}
     }
 
+    // VOICE ANNOUNCEMENT ON STATE CHANGE
+    LaunchedEffect(currentExerciseIndex, workoutState) {
+        if (workoutState == WorkoutState.EXERCISING) {
+            voiceCoach.speakStartExercise(currentExercise.name, currentExercise.defaultDurationSeconds)
+        } else if (workoutState == WorkoutState.RESTING) {
+            val next = plan.exercises.getOrNull(currentExerciseIndex + 1)?.name ?: ""
+            voiceCoach.speakRest(plan.restBetweenSeconds, next)
+        }
+    }
+
     // TIMER LOOP
     LaunchedEffect(isPaused, workoutState, currentExerciseIndex) {
         while (!isPaused && workoutState != WorkoutState.COMPLETED) {
@@ -124,20 +133,20 @@ fun WorkoutSessionPlayerScreen(
             totalWorkoutSeconds++
             if (secondsRemaining > 1) {
                 secondsRemaining--
-                if (secondsRemaining <= 3) {
+                if (secondsRemaining in 1..3) {
                     triggerVibrate()
+                    voiceCoach.speakCountdown(secondsRemaining)
                 }
             } else {
-                // Time's up for current phase
                 triggerVibrate()
                 if (workoutState == WorkoutState.EXERCISING) {
                     if (currentExerciseIndex < totalExercises - 1) {
                         workoutState = WorkoutState.RESTING
                     } else {
-                        // Finished all exercises
+                        // Finished
                         workoutState = WorkoutState.COMPLETED
-                        // Save session to repository
-                        val caloriesBurned = (totalWorkoutSeconds / 60.0) * 11.0 // ~11 kcal/min average
+                        val caloriesBurned = (totalWorkoutSeconds / 60.0) * 11.0
+                        voiceCoach.speakComplete(caloriesBurned.toInt())
                         val session = WorkoutSession(
                             planTitle = plan.title,
                             timestamp = System.currentTimeMillis(),
@@ -154,6 +163,12 @@ fun WorkoutSessionPlayerScreen(
                     workoutState = WorkoutState.EXERCISING
                 }
             }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            voiceCoach.destroy()
         }
     }
 
@@ -255,12 +270,13 @@ fun WorkoutSessionPlayerScreen(
         return
     }
 
-    // ACTIVE SESSION SCREEN
+    // ACTIVE SESSION SCREEN WITH ANIMATED ATHLETE
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(DarkBackground)
             .padding(16.dp)
+            .verticalScroll(rememberScrollState())
     ) {
         // TOP BAR
         Row(
@@ -283,22 +299,35 @@ fun WorkoutSessionPlayerScreen(
                 color = TextPrimary
             )
 
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(CardSurface)
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
-            ) {
-                Text(
-                    text = "${currentExerciseIndex + 1}/$totalExercises",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = EmeraldPrimary
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = {
+                    isMuted = !isMuted
+                    voiceCoach.isMuted = isMuted
+                }) {
+                    Icon(
+                        imageVector = if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                        contentDescription = "Âm thanh HLV",
+                        tint = if (isMuted) TextMuted else EmeraldPrimary
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(CardSurface)
+                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = "${currentExerciseIndex + 1}/$totalExercises",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = EmeraldPrimary
+                    )
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
         // PROGRESS BAR
         val progress = (currentExerciseIndex.toFloat() / totalExercises).coerceIn(0f, 1f)
@@ -312,15 +341,12 @@ fun WorkoutSessionPlayerScreen(
             trackColor = CardSurface
         )
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         // CENTER EXERCISE OR REST CARD
         Column(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             if (workoutState == WorkoutState.RESTING) {
                 val nextExercise = plan.exercises.getOrNull(currentExerciseIndex + 1)
@@ -330,7 +356,7 @@ fun WorkoutSessionPlayerScreen(
                     fontWeight = FontWeight.ExtraBold,
                     color = OrangeBurn
                 )
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = "Chuẩn bị bài tiếp theo: ${nextExercise?.name ?: ""}",
                     style = MaterialTheme.typography.bodyLarge,
@@ -345,7 +371,7 @@ fun WorkoutSessionPlayerScreen(
                     color = TextPrimary,
                     textAlign = TextAlign.Center
                 )
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = "Tác động: ${currentExercise.targetMuscles}",
                     style = MaterialTheme.typography.bodyMedium,
@@ -353,7 +379,7 @@ fun WorkoutSessionPlayerScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // CIRCULAR COUNTDOWN TIMER
             val maxSeconds = if (workoutState == WorkoutState.EXERCISING) currentExercise.defaultDurationSeconds else plan.restBetweenSeconds
@@ -361,65 +387,52 @@ fun WorkoutSessionPlayerScreen(
             val ringColor = if (workoutState == WorkoutState.EXERCISING) EmeraldPrimary else OrangeBurn
 
             Box(
-                modifier = Modifier.size(230.dp),
+                modifier = Modifier.size(190.dp),
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator(
                     progress = { ringProgress },
-                    modifier = Modifier.size(230.dp),
+                    modifier = Modifier.size(190.dp),
                     color = ringColor,
-                    strokeWidth = 14.dp,
+                    strokeWidth = 12.dp,
                     trackColor = CardSurface
                 )
 
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = "$secondsRemaining",
-                        fontSize = 68.sp,
+                        fontSize = 58.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = TextPrimary
                     )
                     Text(
                         text = "giây",
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = TextMuted
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            if (workoutState == WorkoutState.EXERCISING) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    colors = CardDefaults.cardColors(containerColor = CardSurface),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Text(
-                        text = currentExercise.instructions,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextSecondary,
-                        modifier = Modifier.padding(14.dp),
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
+            // ANIMATED EXERCISE DEMONSTRATION CANVAS
+            AnimatedExerciseCanvas(exerciseId = currentExercise.id)
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
 
         // CONTROLS AT BOTTOM
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 16.dp),
+                .padding(vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
             // PAUSE / RESUME BUTTON
             Box(
                 modifier = Modifier
-                    .size(64.dp)
+                    .size(60.dp)
                     .clip(CircleShape)
                     .background(if (isPaused) EmeraldPrimary else CardSurface)
                     .padding(8.dp),
@@ -430,7 +443,7 @@ fun WorkoutSessionPlayerScreen(
                         imageVector = if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
                         contentDescription = if (isPaused) "Tiếp tục" else "Tạm dừng",
                         tint = if (isPaused) DarkBackground else TextPrimary,
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(30.dp)
                     )
                 }
             }
@@ -438,7 +451,7 @@ fun WorkoutSessionPlayerScreen(
             // SKIP BUTTON
             Box(
                 modifier = Modifier
-                    .size(64.dp)
+                    .size(60.dp)
                     .clip(CircleShape)
                     .background(CardSurface)
                     .padding(8.dp),
@@ -462,10 +475,12 @@ fun WorkoutSessionPlayerScreen(
                         imageVector = Icons.Default.FastForward,
                         contentDescription = "Bỏ qua",
                         tint = TextPrimary,
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(30.dp)
                     )
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(30.dp))
     }
 }

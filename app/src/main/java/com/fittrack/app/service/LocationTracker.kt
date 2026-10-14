@@ -18,6 +18,7 @@ class LocationTracker(private val context: Context) : LocationListener {
     private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
 
     private var lastLocation: Location? = null
+
     private val _distanceMeters = MutableStateFlow(0.0)
     val distanceMeters: StateFlow<Double> = _distanceMeters.asStateFlow()
 
@@ -26,6 +27,13 @@ class LocationTracker(private val context: Context) : LocationListener {
 
     private val _isTracking = MutableStateFlow(false)
     val isTracking: StateFlow<Boolean> = _isTracking.asStateFlow()
+
+    // GPS route path points (latitude, longitude) for drawing on Map
+    private val _pathPoints = MutableStateFlow<List<Pair<Double, Double>>>(emptyList())
+    val pathPoints: StateFlow<List<Pair<Double, Double>>> = _pathPoints.asStateFlow()
+
+    private val _currentLocation = MutableStateFlow<Pair<Double, Double>?>(null)
+    val currentLocation: StateFlow<Pair<Double, Double>?> = _currentLocation.asStateFlow()
 
     fun hasPermission(): Boolean {
         return ContextCompat.checkSelfPermission(
@@ -39,14 +47,25 @@ class LocationTracker(private val context: Context) : LocationListener {
         if (!hasPermission() || locationManager == null) return
 
         _distanceMeters.value = 0.0
+        _pathPoints.value = emptyList()
         lastLocation = null
         _isTracking.value = true
 
         try {
+            // Get last known location right away to show on map immediately
+            val lastGps = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+            val lastNet = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+            val initial = lastGps ?: lastNet
+            if (initial != null) {
+                _currentLocation.value = Pair(initial.latitude, initial.longitude)
+                _pathPoints.value = listOf(Pair(initial.latitude, initial.longitude))
+                lastLocation = initial
+            }
+
             if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 locationManager.requestLocationUpdates(
                     LocationManager.GPS_PROVIDER,
-                    2000L, // 2 seconds
+                    1500L, // 1.5 seconds
                     2f,    // 2 meters
                     this
                 )
@@ -72,21 +91,32 @@ class LocationTracker(private val context: Context) : LocationListener {
     fun reset() {
         stopTracking()
         _distanceMeters.value = 0.0
+        _pathPoints.value = emptyList()
+        _currentLocation.value = null
         lastLocation = null
         _currentSpeedMps.value = 0f
     }
 
     override fun onLocationChanged(location: Location) {
         if (!_isTracking.value) return
-        if (location.hasAccuracy() && location.accuracy > 30f) return
+        if (location.hasAccuracy() && location.accuracy > 35f) return
+
+        val point = Pair(location.latitude, location.longitude)
+        _currentLocation.value = point
 
         val prev = lastLocation
         if (prev != null) {
             val delta = prev.distanceTo(location)
-            // Filter realistic running speed jumps (under 12 m/s ~ 43 km/h)
-            if (delta in 1.0..60.0) {
+            // Filter realistic running movements (between 1.5m and 50m per interval)
+            if (delta in 1.5..50.0) {
                 _distanceMeters.value += delta
+                val currentList = _pathPoints.value.toMutableList()
+                currentList.add(point)
+                _pathPoints.value = currentList
             }
+        } else {
+            // First point
+            _pathPoints.value = listOf(point)
         }
         lastLocation = location
 

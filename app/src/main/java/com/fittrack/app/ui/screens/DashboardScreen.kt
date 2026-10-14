@@ -16,35 +16,43 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DirectionsRun
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.LocalFireDepartment
-import androidx.compose.material.icons.filled.MonitorWeight
 import androidx.compose.material.icons.filled.Restaurant
-import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.fittrack.app.data.db.FitTrackRepository
+import com.fittrack.app.ui.components.BmiGaugeCard
 import com.fittrack.app.ui.components.StatCard
 import com.fittrack.app.ui.components.TargetProgressCard
+import com.fittrack.app.ui.components.WaterTrackerCard
 import com.fittrack.app.ui.components.WeeklyCaloriesChart
 import com.fittrack.app.ui.components.WeightTrendChart
 import com.fittrack.app.ui.theme.CardSurface
@@ -52,9 +60,11 @@ import com.fittrack.app.ui.theme.CyanRun
 import com.fittrack.app.ui.theme.DarkBackground
 import com.fittrack.app.ui.theme.EmeraldPrimary
 import com.fittrack.app.ui.theme.OrangeBurn
-import com.fittrack.app.ui.theme.TextMuted
 import com.fittrack.app.ui.theme.TextPrimary
 import com.fittrack.app.ui.theme.TextSecondary
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 @Composable
@@ -71,11 +81,11 @@ fun DashboardScreen(
     val runs by repository.runSessions.collectAsState()
 
     val currentWeight = weights.firstOrNull()?.weightKg ?: profile.initialWeightKg
-    val bmi = profile.calculateBmi(currentWeight)
-    val bmiCategory = profile.getBmiCategory(bmi)
     val todayCalories = repository.getTodayCaloriesBurned()
     val totalKm = repository.getTotalKmRun()
     val workoutMins = repository.getTotalWorkoutMinutes()
+
+    var showQuickSetupDialog by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -84,7 +94,7 @@ fun DashboardScreen(
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
-        // HEADER GREETING
+        // GREETING HEADER
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -98,7 +108,7 @@ fun DashboardScreen(
                     color = TextPrimary
                 )
                 Text(
-                    text = "Hôm nay hãy cùng đốt mỡ và giảm cân nhé!",
+                    text = "Lộ trình giảm cân & tập luyện hôm nay",
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextSecondary
                 )
@@ -123,74 +133,20 @@ fun DashboardScreen(
 
         Spacer(modifier = Modifier.height(18.dp))
 
-        // WEIGHT & BMI OVERVIEW CARD
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = CardSurface),
-            shape = RoundedCornerShape(20.dp)
-        ) {
-            Column(modifier = Modifier.padding(18.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Top
-                ) {
-                    Column {
-                        Text(
-                            text = "CÂN NẶNG HIỆN TẠI",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = TextMuted,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.Bottom) {
-                            Text(
-                                text = String.format(Locale.US, "%.1f", currentWeight),
-                                style = MaterialTheme.typography.headlineLarge,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = TextPrimary
-                            )
-                            Text(
-                                text = " kg",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = TextMuted,
-                                modifier = Modifier.padding(bottom = 4.dp)
-                            )
-                        }
-                    }
+        // ADVANCED BMI & BODY METRICS GAUGE CARD
+        BmiGaugeCard(
+            currentWeightKg = currentWeight,
+            profile = profile,
+            onEditProfile = { showQuickSetupDialog = true }
+        )
 
-                    // BMI BADGE
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(bmiCategory.colorHex).copy(alpha = 0.2f))
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                    ) {
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(
-                                text = "BMI $bmi",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                color = Color(bmiCategory.colorHex)
-                            )
-                            Text(
-                                text = bmiCategory.label,
-                                fontSize = 11.sp,
-                                color = Color(bmiCategory.colorHex)
-                            )
-                        }
-                    }
-                }
+        Spacer(modifier = Modifier.height(16.dp))
 
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // TARGET PROGRESS
-                TargetProgressCard(
-                    currentWeightKg = currentWeight,
-                    profile = profile
-                )
-            }
-        }
+        // TARGET PROGRESS CARD
+        TargetProgressCard(
+            currentWeightKg = currentWeight,
+            profile = profile
+        )
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -226,6 +182,12 @@ fun DashboardScreen(
                 modifier = Modifier.weight(1f)
             )
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // DAILY WATER TRACKER
+        val goalWater = (currentWeight * 35).toInt().coerceAtLeast(1500)
+        WaterTrackerCard(goalMl = goalWater)
 
         Spacer(modifier = Modifier.height(20.dp))
 
@@ -288,7 +250,7 @@ fun DashboardScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // BMR & DEFICIT NUTRITION ADVICE
+        // NUTRITION & CALORIE DEFICIT ADVICE
         val bmr = profile.calculateBmr(currentWeight)
         val tdee = profile.calculateTdee(currentWeight)
         val targetIn = profile.getWeightLossTargetCalories(currentWeight)
@@ -318,9 +280,9 @@ fun DashboardScreen(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "• BMR (Năng lượng cơ bản khi ngủ nghỉ): ${bmr.toInt()} kcal/ngày\n" +
+                    text = "• BMR (Năng lượng cơ bản duy trì sự sống): ${bmr.toInt()} kcal/ngày\n" +
                             "• TDEE (Tổng năng lượng tiêu thụ thực tế): ${tdee.toInt()} kcal/ngày\n" +
-                            "• Nạp đề xuất: ~${targetIn.toInt()} kcal/ngày (để giảm 0.5kg mỡ/tuần an toàn).",
+                            "• Nạp đề xuất: ~${targetIn.toInt()} kcal/ngày (thâm hụt 500 kcal/ngày để giảm đều 0.5kg mỡ/tuần an toàn).",
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextSecondary,
                     lineHeight = 22.sp
@@ -363,5 +325,91 @@ fun DashboardScreen(
         }
 
         Spacer(modifier = Modifier.height(30.dp))
+    }
+
+    // QUICK SETUP DIALOG FOR HEIGHT, CURRENT WEIGHT & TARGET WEIGHT
+    if (showQuickSetupDialog) {
+        var inputHeight by remember { mutableStateOf(profile.heightCm.toInt().toString()) }
+        var inputWeight by remember { mutableStateOf(String.format(Locale.US, "%.1f", currentWeight)) }
+        var inputTarget by remember { mutableStateOf(profile.targetWeightKg.toInt().toString()) }
+
+        AlertDialog(
+            onDismissRequest = { showQuickSetupDialog = false },
+            containerColor = CardSurface,
+            title = {
+                Text(
+                    text = "Cập Nhật Chiều Cao & Cân Nặng",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "Nhập chính xác để app tính toán BMI, BMR và lượng calo chuẩn nhất:",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary
+                    )
+
+                    OutlinedTextField(
+                        value = inputHeight,
+                        onValueChange = { inputHeight = it },
+                        label = { Text("Chiều cao (cm) *") },
+                        placeholder = { Text("Ví dụ: 170") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = inputWeight,
+                        onValueChange = { inputWeight = it },
+                        label = { Text("Cân nặng hiện tại (kg) *") },
+                        placeholder = { Text("Ví dụ: 72.5") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = inputTarget,
+                        onValueChange = { inputTarget = it },
+                        label = { Text("Cân nặng mục tiêu (kg) *") },
+                        placeholder = { Text("Ví dụ: 65") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val h = inputHeight.toDoubleOrNull() ?: profile.heightCm
+                        val w = inputWeight.toDoubleOrNull() ?: currentWeight
+                        val tgt = inputTarget.toDoubleOrNull() ?: profile.targetWeightKg
+
+                        val updatedProfile = profile.copy(
+                            heightCm = h,
+                            targetWeightKg = tgt
+                        )
+                        CoroutineScope(Dispatchers.IO).launch {
+                            repository.saveProfile(updatedProfile)
+                            repository.addWeight(weightKg = w, note = "Cập nhật thể trạng")
+                        }
+                        showQuickSetupDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary)
+                ) {
+                    Text(text = "Lưu Chỉ Số", color = DarkBackground, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showQuickSetupDialog = false }) {
+                    Text(text = "Đóng", color = TextSecondary)
+                }
+            }
+        )
     }
 }
