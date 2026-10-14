@@ -8,10 +8,13 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.core.content.ContextCompat
 import com.fittrack.app.data.db.FitTrackRepository
+import com.fittrack.app.data.model.PlannedRoute
+import com.fittrack.app.data.model.Roadmap
 import com.fittrack.app.data.model.RunSession
 import com.fittrack.app.data.model.ZombieAlertLevel
 import com.fittrack.app.data.model.ZombieChaseState
 import com.fittrack.app.data.model.ZombieDifficulty
+import com.fittrack.app.util.RoadmapEngine
 import com.fittrack.app.util.StreetChaseEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +39,8 @@ object RunningSessionManager {
     private val scope = CoroutineScope(Dispatchers.Main + Job())
     private var timerJob: Job? = null
     private var streetFetchJob: Job? = null
+    private var roadmapRouteJob: Job? = null
+    private var countdownJob: Job? = null
 
     var locationTracker: LocationTracker? = null
         private set
@@ -80,8 +85,35 @@ object RunningSessionManager {
     private val _lastFinishedRun = MutableStateFlow<RunSession?>(null)
     val lastFinishedRun: StateFlow<RunSession?> = _lastFinishedRun.asStateFlow()
 
+    // Pre-run Roadmap Planning State
+    private val _isPlanningRoadmap = MutableStateFlow(false)
+    val isPlanningRoadmap: StateFlow<Boolean> = _isPlanningRoadmap.asStateFlow()
+
+    private val _draftWaypoints = MutableStateFlow<List<Pair<Double, Double>>>(emptyList())
+    val draftWaypoints: StateFlow<List<Pair<Double, Double>>> = _draftWaypoints.asStateFlow()
+
+    private val _plannedRoute = MutableStateFlow<PlannedRoute?>(null)
+    val plannedRoute: StateFlow<PlannedRoute?> = _plannedRoute.asStateFlow()
+
+    private val _activeRoadmap = MutableStateFlow<Roadmap?>(null)
+    val activeRoadmap: StateFlow<Roadmap?> = _activeRoadmap.asStateFlow()
+
+    private val _isOffTrack = MutableStateFlow(false)
+    val isOffTrack: StateFlow<Boolean> = _isOffTrack.asStateFlow()
+
+    private val _offTrackDistanceMeters = MutableStateFlow(0)
+    val offTrackDistanceMeters: StateFlow<Int> = _offTrackDistanceMeters.asStateFlow()
+
+    private val _routeProgressRatio = MutableStateFlow(0f)
+    val routeProgressRatio: StateFlow<Float> = _routeProgressRatio.asStateFlow()
+
+    private val _countdownSeconds = MutableStateFlow<Int?>(null)
+    val countdownSeconds: StateFlow<Int?> = _countdownSeconds.asStateFlow()
+
     private var lastZombieWarningSec = 0L
     private var lastAnnouncedKm = 0
+    private var lastOffTrackWarningSec = 0L
+    private var hasAnnouncedCompletion = false
 
     fun clearLastFinishedRun() {
         _lastFinishedRun.value = null
@@ -114,6 +146,9 @@ object RunningSessionManager {
         _manualDistanceMeters.value = 0.0
         lastZombieWarningSec = 0L
         lastAnnouncedKm = 0
+        lastOffTrackWarningSec = 0L
+        hasAnnouncedCompletion = false
+        _isPlanningRoadmap.value = false
 
         _zombieState.value = ZombieChaseState(
             isEnabled = isZombieMode,
@@ -162,6 +197,36 @@ object RunningSessionManager {
                         val repo = FitTrackRepository.getInstance(appContext)
                         val cal = (repo.getLatestWeight() * (currentTotalDist / 1000.0) * 1.036).toInt()
                         voiceCoach?.speakKmMilestone(currentKm, paceSec, cal)
+                    }
+
+                    // Active roadmap off-track & progress monitoring
+                    val planned = _plannedRoute.value
+                    val curLoc = locationTracker?.currentLocation?.value
+                    if (planned != null && planned.routeCoordinates.size >= 2 && curLoc != null) {
+                        val distOff = RoadmapEngine.distanceToRoute(curLoc, planned.routeCoordinates)
+                        if (distOff > 45.0) {
+                            _isOffTrack.value = true
+                            _offTrackDistanceMeters.value = distOff.toInt()
+                            if (_elapsedSeconds.value - lastOffTrackWarningSec > 15) {
+                                triggerHaptic(appContext, 500)
+                                voiceCoach?.speakOffTrackWarning(distOff.toInt())
+                                lastOffTrackWarningSec = _elapsedSeconds.value
+                            }
+                        } else {
+                            if (_isOffTrack.value) {
+                                voiceCoach?.speakBackOnTrack()
+                            }
+                            _isOffTrack.value = false
+                            _offTrackDistanceMeters.value = 0
+                        }
+
+                        val progress = RoadmapEngine.calculateProgressRatio(curLoc, planned.routeCoordinates)
+                        _routeProgressRatio.value = progress
+                        if (progress >= 0.96f && !hasAnnouncedCompletion) {
+                            hasAnnouncedCompletion = true
+                            voiceCoach?.speakRoadmapCompleted()
+                            triggerHaptic(appContext, 800)
+                        }
                     }
 
                     // Periodic real street route refresh every 15s
@@ -356,5 +421,102 @@ object RunningSessionManager {
                 vibrator?.vibrate(durationMs)
             }
         } catch (_: Exception) {}
+    }
+
+    // PRE-RUN ROADMAP PLANNING & COUNTDOWN
+    fun startPlanningRoadmap() {
+        _isPlanningRoadmap.value = true
+        if (_draftWaypoints.value.isEmpty()) {
+            locationTracker?.currentLocation?.value?.let { cur ->
+                addWaypoint(cur.first, cur.second)
+            }
+        }
+    }
+
+    fun cancelPlanningRoadmap() {
+        _isPlanningRoadmap.value = false
+    }
+
+    fun addWaypoint(lat: Double, lng: Double) {
+        val updated = _draftWaypoints.value.toMutableList()
+        updated.add(Pair(lat, lng))
+        _draftWaypoints.value = updated
+        recalculateRoadmapRoute()
+    }
+
+    fun undoWaypoint() {
+        val current = _draftWaypoints.value
+        if (current.isNotEmpty()) {
+            val updated = current.dropLast(1)
+            _draftWaypoints.value = updated
+            recalculateRoadmapRoute()
+        }
+    }
+
+    fun closeLoop() {
+        val current = _draftWaypoints.value
+        if (current.size >= 2) {
+            val first = current.first()
+            addWaypoint(first.first, first.second)
+        }
+    }
+
+    fun clearRoadmapDraft() {
+        _draftWaypoints.value = emptyList()
+        _plannedRoute.value = null
+        _activeRoadmap.value = null
+        _isOffTrack.value = false
+        _routeProgressRatio.value = 0f
+    }
+
+    fun setActiveRoadmap(roadmap: Roadmap?) {
+        _activeRoadmap.value = roadmap
+        if (roadmap != null) {
+            _plannedRoute.value = PlannedRoute(
+                distanceMeters = roadmap.distanceMeters,
+                estimatedDurationSeconds = roadmap.estimatedDurationSeconds,
+                routeCoordinates = roadmap.routeCoordinates
+            )
+            _draftWaypoints.value = roadmap.waypoints
+        } else {
+            clearRoadmapDraft()
+        }
+    }
+
+    fun startCountdown(
+        context: Context,
+        isZombieMode: Boolean = true,
+        difficulty: ZombieDifficulty = ZombieDifficulty.RUNNER,
+        onFinish: () -> Unit
+    ) {
+        countdownJob?.cancel()
+        countdownJob = scope.launch {
+            for (sec in 3 downTo 1) {
+                _countdownSeconds.value = sec
+                voiceCoach?.speakRunCountdown(sec)
+                triggerHaptic(context, 200)
+                delay(1000L)
+            }
+            _countdownSeconds.value = 0
+            voiceCoach?.speakRunCountdown(0)
+            triggerHaptic(context, 500)
+            delay(400L)
+            _countdownSeconds.value = null
+            startRun(context, isZombieMode, difficulty)
+            onFinish()
+        }
+    }
+
+    private fun recalculateRoadmapRoute() {
+        val wps = _draftWaypoints.value
+        if (wps.size < 2) {
+            _plannedRoute.value = if (wps.size == 1) PlannedRoute(0.0, 0L, listOf(wps[0])) else null
+            return
+        }
+        roadmapRouteJob?.cancel()
+        roadmapRouteJob = scope.launch {
+            val route = RoadmapEngine.calculateRoute(wps)
+            _plannedRoute.value = route
+        }
     }
 }

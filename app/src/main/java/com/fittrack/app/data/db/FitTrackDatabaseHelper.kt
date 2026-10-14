@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import com.fittrack.app.data.model.Roadmap
 import com.fittrack.app.data.model.RunSession
 import com.fittrack.app.data.model.UserProfile
 import com.fittrack.app.data.model.WeightEntry
@@ -14,13 +15,18 @@ class FitTrackDatabaseHelper(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "fittrack.db"
-        const val DATABASE_VERSION = 1
+        const val DATABASE_VERSION = 2
 
         // Tables
         const val TABLE_PROFILE = "profile"
         const val TABLE_WEIGHT = "weight_entries"
         const val TABLE_WORKOUT = "workout_sessions"
         const val TABLE_RUN = "run_sessions"
+        const val TABLE_ROADMAP = "roadmaps"
+
+        // Roadmap columns
+        const val COL_WAYPOINTS = "waypoints_json"
+        const val COL_ROUTE_COORDS = "route_coords_json"
 
         // Profile columns
         const val COL_NAME = "name"
@@ -99,10 +105,23 @@ class FitTrackDatabaseHelper(context: Context) :
             )
         """.trimIndent()
 
+        val createRoadmapTable = """
+            CREATE TABLE $TABLE_ROADMAP (
+                $COL_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                $COL_NAME TEXT NOT NULL,
+                $COL_DISTANCE_METERS REAL NOT NULL,
+                $COL_DURATION_SEC INTEGER NOT NULL,
+                $COL_WAYPOINTS TEXT NOT NULL,
+                $COL_ROUTE_COORDS TEXT NOT NULL,
+                $COL_TIMESTAMP INTEGER NOT NULL
+            )
+        """.trimIndent()
+
         db.execSQL(createProfileTable)
         db.execSQL(createWeightTable)
         db.execSQL(createWorkoutTable)
         db.execSQL(createRunTable)
+        db.execSQL(createRoadmapTable)
 
         // Seed initial default profile and weight
         val initialValues = ContentValues().apply {
@@ -127,11 +146,20 @@ class FitTrackDatabaseHelper(context: Context) :
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_PROFILE")
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_WEIGHT")
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_WORKOUT")
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_RUN")
-        onCreate(db)
+        if (oldVersion < 2) {
+            val createRoadmapTable = """
+                CREATE TABLE IF NOT EXISTS $TABLE_ROADMAP (
+                    $COL_ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    $COL_NAME TEXT NOT NULL,
+                    $COL_DISTANCE_METERS REAL NOT NULL,
+                    $COL_DURATION_SEC INTEGER NOT NULL,
+                    $COL_WAYPOINTS TEXT NOT NULL,
+                    $COL_ROUTE_COORDS TEXT NOT NULL,
+                    $COL_TIMESTAMP INTEGER NOT NULL
+                )
+            """.trimIndent()
+            db.execSQL(createRoadmapTable)
+        }
     }
 
     // PROFILE OPERATIONS
@@ -293,5 +321,47 @@ class FitTrackDatabaseHelper(context: Context) :
     fun deleteRun(id: Long): Int {
         val db = writableDatabase
         return db.delete(TABLE_RUN, "$COL_ID = ?", arrayOf(id.toString()))
+    }
+
+    // ROADMAP OPERATIONS
+    fun insertRoadmap(roadmap: Roadmap): Long {
+        val db = writableDatabase
+        val values = ContentValues().apply {
+            put(COL_NAME, roadmap.name)
+            put(COL_DISTANCE_METERS, roadmap.distanceMeters)
+            put(COL_DURATION_SEC, roadmap.estimatedDurationSeconds)
+            put(COL_WAYPOINTS, roadmap.waypointsToJson())
+            put(COL_ROUTE_COORDS, roadmap.routeCoordinatesToJson())
+            put(COL_TIMESTAMP, roadmap.createdAt)
+        }
+        return db.insert(TABLE_ROADMAP, null, values)
+    }
+
+    fun getAllRoadmaps(): List<Roadmap> {
+        val list = mutableListOf<Roadmap>()
+        val db = readableDatabase
+        val cursor = db.query(TABLE_ROADMAP, null, null, null, null, null, "$COL_TIMESTAMP DESC")
+        if (cursor.moveToFirst()) {
+            do {
+                list.add(
+                    Roadmap(
+                        id = cursor.getLong(cursor.getColumnIndexOrThrow(COL_ID)),
+                        name = cursor.getString(cursor.getColumnIndexOrThrow(COL_NAME)),
+                        distanceMeters = cursor.getDouble(cursor.getColumnIndexOrThrow(COL_DISTANCE_METERS)),
+                        estimatedDurationSeconds = cursor.getLong(cursor.getColumnIndexOrThrow(COL_DURATION_SEC)),
+                        waypoints = Roadmap.parseCoordsJson(cursor.getString(cursor.getColumnIndexOrThrow(COL_WAYPOINTS))),
+                        routeCoordinates = Roadmap.parseCoordsJson(cursor.getString(cursor.getColumnIndexOrThrow(COL_ROUTE_COORDS))),
+                        createdAt = cursor.getLong(cursor.getColumnIndexOrThrow(COL_TIMESTAMP))
+                    )
+                )
+            } while (cursor.moveToNext())
+        }
+        cursor.close()
+        return list
+    }
+
+    fun deleteRoadmap(id: Long): Int {
+        val db = writableDatabase
+        return db.delete(TABLE_ROADMAP, "$COL_ID = ?", arrayOf(id.toString()))
     }
 }

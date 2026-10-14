@@ -62,10 +62,12 @@ import com.fittrack.app.ui.theme.OrangeBurn
 import com.fittrack.app.util.StreetChaseEngine
 import kotlinx.coroutines.delay
 import org.osmdroid.config.Configuration
+import org.osmdroid.events.MapEventsReceiver
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 import java.io.File
@@ -116,12 +118,18 @@ fun RealStreetZombieMapView(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var layerMode by remember { mutableIntStateOf(0) } // 0: Carto Voyager, 1: Carto Dark, 2: OpenTopo
+    var layerMode by remember { mutableIntStateOf(0) } // 0: OSM HOT, 1: CyclOSM, 2: OpenTopo
     var hasAutoCentered by remember { mutableStateOf(false) }
 
     // Pre-fetched real OpenStreetMap street prefix nodes from RunningSessionManager (Single source of truth)
     val streetPrefix by RunningSessionManager.streetPrefix.collectAsState()
     var isFollowBearing by remember { mutableStateOf(false) }
+
+    // Pre-run Roadmap Planning State
+    val isPlanningRoadmap by RunningSessionManager.isPlanningRoadmap.collectAsState()
+    val draftWaypoints by RunningSessionManager.draftWaypoints.collectAsState()
+    val plannedRoute by RunningSessionManager.plannedRoute.collectAsState()
+    val isOffTrack by RunningSessionManager.isOffTrack.collectAsState()
 
     // Fallback coordinate only if GPS is completely unavailable
     val defaultLat = currentLocation?.first ?: 10.7769
@@ -139,7 +147,7 @@ fun RealStreetZombieMapView(
     // Initialize osmdroid Configuration & cleanup any old watermarked Carto tiles
     remember {
         Configuration.getInstance().apply {
-            userAgentValue = "FitTrackApp/1.6.2 (com.fittrack.app; Android)"
+            userAgentValue = "FitTrackApp/1.7.0 (com.fittrack.app; Android)"
             osmdroidBasePath = File(context.cacheDir, "osmdroid")
             osmdroidTileCache = File(context.cacheDir, "osmdroid/tiles")
         }
@@ -147,6 +155,20 @@ fun RealStreetZombieMapView(
             File(context.cacheDir, "osmdroid/tiles/CartoVoyager").deleteRecursively()
             File(context.cacheDir, "osmdroid/tiles/CartoDark").deleteRecursively()
         } catch (_: Exception) {}
+    }
+
+    // Map tap events overlay for interactive waypoint placement
+    val mapEventsOverlay = remember {
+        MapEventsOverlay(object : MapEventsReceiver {
+            override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean {
+                if (p != null && RunningSessionManager.isPlanningRoadmap.value) {
+                    RunningSessionManager.addWaypoint(p.latitude, p.longitude)
+                    return true
+                }
+                return false
+            }
+            override fun longPressHelper(p: GeoPoint?): Boolean = false
+        })
     }
 
     // Retain native MapView and its overlays
@@ -158,8 +180,22 @@ fun RealStreetZombieMapView(
             isTilesScaledToDpi = true
             controller.setZoom(17.5)
             controller.setCenter(GeoPoint(defaultLat, defaultLng))
+            overlays.add(0, mapEventsOverlay)
         }
     }
+
+    // Native Polyline for Planned Roadmap (Vibrant Neon Purple #A855F7)
+    val plannedRoutePolyline = remember {
+        Polyline(mapView).apply {
+            outlinePaint.color = android.graphics.Color.parseColor("#A855F7")
+            outlinePaint.strokeWidth = 14f
+            outlinePaint.strokeCap = Paint.Cap.ROUND
+            outlinePaint.strokeJoin = Paint.Join.ROUND
+        }
+    }
+
+    // List of active waypoint markers
+    val waypointMarkers = remember { mutableListOf<Marker>() }
 
     // Manage MapView Android lifecycle (vital for Lock Screen wake/sleep resume)
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -272,7 +308,7 @@ fun RealStreetZombieMapView(
         }
     }
 
-    // Live update coordinates, real street route navigation, and animated sprites
+    // Live update coordinates, real street route navigation, roadmap overlay, and animated sprites
     LaunchedEffect(
         animFrame,
         pathPoints,
@@ -281,8 +317,43 @@ fun RealStreetZombieMapView(
         currentBearing,
         zombieState.distanceMeters,
         zombieState.isEnabled,
-        isRunning
+        isRunning,
+        draftWaypoints,
+        plannedRoute,
+        isPlanningRoadmap
     ) {
+        // 0. Update Planned Roadmap Polyline & Waypoint Pins
+        if (plannedRoute != null && plannedRoute!!.routeCoordinates.size >= 2) {
+            plannedRoutePolyline.setPoints(plannedRoute!!.routeCoordinates.map { GeoPoint(it.first, it.second) })
+            if (!mapView.overlays.contains(plannedRoutePolyline)) {
+                mapView.overlays.add(1, plannedRoutePolyline)
+            }
+        } else {
+            mapView.overlays.remove(plannedRoutePolyline)
+        }
+
+        waypointMarkers.forEach { mapView.overlays.remove(it) }
+        waypointMarkers.clear()
+
+        if (draftWaypoints.isNotEmpty()) {
+            draftWaypoints.forEachIndexed { idx, wp ->
+                val m = Marker(mapView).apply {
+                    position = GeoPoint(wp.first, wp.second)
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                    val isStart = idx == 0
+                    val isEnd = idx == draftWaypoints.size - 1 && draftWaypoints.size > 1
+                    title = when {
+                        isStart -> "🚩 Điểm Xuất Phát"
+                        isEnd -> "🏁 Điểm Về Đích"
+                        else -> "Điểm mốc #${idx + 1}"
+                    }
+                    icon = createWaypointPinDrawable(context, idx + 1, isStart, isEnd)
+                }
+                waypointMarkers.add(m)
+                mapView.overlays.add(m)
+            }
+        }
+
         if (currentLocation != null) {
             val curLat = currentLocation.first
             val curLng = currentLocation.second
@@ -615,3 +686,60 @@ private fun createStartFlagDrawable(context: Context): BitmapDrawable {
 
     return BitmapDrawable(context.resources, bitmap)
 }
+
+/**
+ * Creates custom pin drawable for Waypoint Checkpoints (🚩, 🏁, or number)
+ */
+private fun createWaypointPinDrawable(
+    context: Context,
+    number: Int,
+    isStart: Boolean,
+    isEnd: Boolean
+): BitmapDrawable {
+    val sizePx = 80
+    val bitmap = Bitmap.createBitmap(sizePx, sizePx + 16, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    val cx = sizePx / 2f
+    val cy = sizePx / 2f - 4f
+    val r = sizePx / 2f - 6f
+
+    // Shadow
+    paint.color = android.graphics.Color.parseColor("#66000000")
+    canvas.drawCircle(cx, cy + 4f, r, paint)
+
+    // Outer circle
+    val mainColor = when {
+        isStart -> android.graphics.Color.parseColor("#10B981") // Emerald Green
+        isEnd -> android.graphics.Color.parseColor("#F59E0B") // Amber Gold
+        else -> android.graphics.Color.parseColor("#A855F7") // Neon Purple
+    }
+    paint.color = mainColor
+    canvas.drawCircle(cx, cy, r, paint)
+
+    // White border
+    paint.color = android.graphics.Color.WHITE
+    paint.style = Paint.Style.STROKE
+    paint.strokeWidth = 5f
+    canvas.drawCircle(cx, cy, r, paint)
+
+    // Text / Icon
+    paint.style = Paint.Style.FILL
+    paint.textSize = if (isStart || isEnd) 30f else 26f
+    paint.textAlign = Paint.Align.CENTER
+    paint.isFakeBoldText = true
+
+    val text = when {
+        isStart -> "🚩"
+        isEnd -> "🏁"
+        else -> "$number"
+    }
+
+    val fontMetrics = paint.fontMetrics
+    val textY = cy - (fontMetrics.ascent + fontMetrics.descent) / 2
+    canvas.drawText(text, cx, textY, paint)
+
+    return BitmapDrawable(context.resources, bitmap)
+}
+

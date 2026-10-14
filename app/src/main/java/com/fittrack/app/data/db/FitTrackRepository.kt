@@ -1,6 +1,7 @@
 package com.fittrack.app.data.db
 
 import android.content.Context
+import com.fittrack.app.data.model.Roadmap
 import com.fittrack.app.data.model.RunSession
 import com.fittrack.app.data.model.UserProfile
 import com.fittrack.app.data.model.WeightEntry
@@ -30,6 +31,9 @@ class FitTrackRepository(context: Context) {
     private val _runSessions = MutableStateFlow<List<RunSession>>(emptyList())
     val runSessions: StateFlow<List<RunSession>> = _runSessions.asStateFlow()
 
+    private val _roadmaps = MutableStateFlow<List<Roadmap>>(emptyList())
+    val roadmaps: StateFlow<List<Roadmap>> = _roadmaps.asStateFlow()
+
     init {
         loadAll()
     }
@@ -40,11 +44,13 @@ class FitTrackRepository(context: Context) {
             val weights = dbHelper.getAllWeights()
             val workouts = dbHelper.getAllWorkouts()
             val runs = dbHelper.getAllRuns()
+            val roadmaps = dbHelper.getAllRoadmaps()
 
             _userProfile.value = profile
             _weightEntries.value = weights
             _workoutSessions.value = workouts
             _runSessions.value = runs
+            _roadmaps.value = roadmaps
         }
     }
 
@@ -82,6 +88,17 @@ class FitTrackRepository(context: Context) {
     suspend fun deleteRun(id: Long) = withContext(Dispatchers.IO) {
         dbHelper.deleteRun(id)
         _runSessions.value = dbHelper.getAllRuns()
+    }
+
+    suspend fun saveRoadmap(roadmap: Roadmap): Long = withContext(Dispatchers.IO) {
+        val id = dbHelper.insertRoadmap(roadmap)
+        _roadmaps.value = dbHelper.getAllRoadmaps()
+        id
+    }
+
+    suspend fun deleteRoadmap(id: Long) = withContext(Dispatchers.IO) {
+        dbHelper.deleteRoadmap(id)
+        _roadmaps.value = dbHelper.getAllRoadmaps()
     }
 
     // STATISTICAL HELPERS

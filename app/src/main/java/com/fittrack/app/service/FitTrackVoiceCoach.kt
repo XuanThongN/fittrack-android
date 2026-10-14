@@ -59,6 +59,28 @@ class FitTrackVoiceCoach(context: Context) : TextToSpeech.OnInitListener {
         speak("Bạn đã hoàn thành $km kilômét! Pace $pm phút $ps giây. Đã đốt $calories calo. Cố lên nào!")
     }
 
+    // PRE-RUN COUNTDOWN & ROADMAP AUDIO ALERTS
+    fun speakRunCountdown(sec: Int) {
+        when (sec) {
+            3 -> speak("Ba")
+            2 -> speak("Hai")
+            1 -> speak("Một")
+            0 -> speak("Bắt đầu chạy!")
+        }
+    }
+
+    fun speakOffTrackWarning(distMeters: Int) {
+        speak("Chú ý! Bạn đang chạy chệch khỏi lộ trình $distMeters mét!")
+    }
+
+    fun speakBackOnTrack() {
+        speak("Bạn đã quay lại lộ trình đã chọn. Tiếp tục nào!")
+    }
+
+    fun speakRoadmapCompleted() {
+        speak("Chúc mừng! Bạn đã hoàn thành toàn bộ lộ trình mục tiêu!")
+    }
+
     // ZOMBIE CHASE AUDIO ALERTS
     fun speakZombieStart(difficultyTitle: String) {
         speak("Kích hoạt chế độ sinh tồn! Đàn $difficultyTitle đang ở sau lưng bạn 80 mét. Chạy ngay, đừng dừng lại!")
