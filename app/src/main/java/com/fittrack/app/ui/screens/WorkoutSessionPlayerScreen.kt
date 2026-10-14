@@ -73,6 +73,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+enum class WorkoutState {
+    EXERCISING,
+    RESTING,
+    COMPLETED
+}
+
 @Composable
 fun WorkoutSessionPlayerScreen(
     plan: WorkoutPlan,

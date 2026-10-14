@@ -221,10 +221,10 @@ fun BmiGaugeCard(
                         lineTo(needleX + 8f, barY - 14f)
                         close()
                     }
-                    drawPath(needlePath, color = Color.WHITE)
+                    drawPath(needlePath, color = Color.White)
 
                     // Needle circle base
-                    drawCircle(Color.WHITE, 4f, Offset(needleX, barY + barH / 2f))
+                    drawCircle(Color.White, 4f, Offset(needleX, barY + barH / 2f))
                 }
             }
 
