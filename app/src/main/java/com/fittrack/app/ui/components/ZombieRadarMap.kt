@@ -30,7 +30,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -49,15 +48,17 @@ import com.fittrack.app.ui.theme.DarkBackground
 import com.fittrack.app.ui.theme.EmeraldPrimary
 import com.fittrack.app.ui.theme.OrangeBurn
 import com.fittrack.app.ui.theme.TextMuted
-import com.fittrack.app.ui.theme.TextPrimary
+import com.fittrack.app.util.StreetChaseEngine
 import java.util.Locale
 
 @Composable
 fun ZombieRadarMap(
     pathPoints: List<Pair<Double, Double>>,
     currentLocation: Pair<Double, Double>?,
+    currentBearing: Float = 0f,
     zombieState: ZombieChaseState,
     runnerSpeedKmh: Double,
+    isRunning: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     // Infinite radar sweep rotation
@@ -86,7 +87,7 @@ fun ZombieRadarMap(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .height(220.dp),
+            .height(230.dp),
         colors = CardDefaults.cardColors(containerColor = CardSurface),
         shape = RoundedCornerShape(20.dp)
     ) {
@@ -155,25 +156,26 @@ fun ZombieRadarMap(
                 )
 
                 // 4. Draw GPS Polyline Route
-                if (pathPoints.size >= 2) {
-                    // Normalize GPS coordinates to canvas scale around runner (last point)
-                    val lastPt = pathPoints.last()
-                    // 1 meter in latitude is approx 0.000009 degrees
-                    val meterScale = (maxRadius / 150f) // pixels per meter
+                val refPt = currentLocation ?: (if (pathPoints.isNotEmpty()) pathPoints.last() else Pair(10.7769, 106.7009))
+                val meterScale = (maxRadius / 150f) // pixels per meter
 
+                fun toRadarOffset(pt: Pair<Double, Double>): Offset {
+                    val dxMeters = ((pt.second - refPt.second) * 111320.0 * kotlin.math.cos(Math.toRadians(refPt.first))).toFloat()
+                    val dyMeters = -((pt.first - refPt.first) * 110540.0).toFloat()
+                    val zX = (cx + dxMeters * meterScale).coerceIn(12f, w - 12f)
+                    val zY = (cy + dyMeters * meterScale).coerceIn(12f, h - 12f)
+                    return Offset(zX, zY)
+                }
+
+                if (pathPoints.size >= 2) {
                     val routePath = Path()
                     pathPoints.forEachIndexed { index, pt ->
-                        val dxMeters = ((pt.second - lastPt.second) * 111320.0 * kotlin.math.cos(Math.toRadians(lastPt.first))).toFloat()
-                        val dyMeters = -((pt.first - lastPt.first) * 110540.0).toFloat()
-                        val ptX = (cx + dxMeters * meterScale).coerceIn(10f, w - 10f)
-                        val ptY = (cy + dyMeters * meterScale).coerceIn(10f, h - 10f)
-
+                        val ptOffset = toRadarOffset(pt)
                         if (index == 0) {
-                            routePath.moveTo(ptX, ptY)
-                            // Start Flag Circle
-                            drawCircle(EmeraldPrimary, 7f, Offset(ptX, ptY))
+                            routePath.moveTo(ptOffset.x, ptOffset.y)
+                            drawCircle(EmeraldPrimary, 7f, ptOffset)
                         } else {
-                            routePath.lineTo(ptX, ptY)
+                            routePath.lineTo(ptOffset.x, ptOffset.y)
                         }
                     }
 
@@ -184,21 +186,36 @@ fun ZombieRadarMap(
                     )
                 }
 
-                // 5. Runner Marker (Center of Radar)
+                // 5. Runner Marker (Center of Radar with Pulse & Heading Arrow)
+                val runnerPulseRad = 16f + (pulseAlpha * 8f)
                 drawCircle(
-                    color = CyanLight.copy(alpha = 0.35f),
-                    radius = 20f,
+                    color = CyanLight.copy(alpha = 0.3f),
+                    radius = runnerPulseRad,
                     center = Offset(cx, cy)
                 )
                 drawCircle(
                     color = Color.White,
-                    radius = 8f,
+                    radius = 9f,
                     center = Offset(cx, cy)
                 )
                 drawCircle(
                     color = CyanRun,
-                    radius = 5f,
+                    radius = 5.5f,
                     center = Offset(cx, cy)
+                )
+
+                // Direction pointer arrow
+                val arrowAngleRad = Math.toRadians((currentBearing.toDouble() - 90.0))
+                val arrowTip = Offset(
+                    (cx + kotlin.math.cos(arrowAngleRad) * 18f).toFloat(),
+                    (cy + kotlin.math.sin(arrowAngleRad) * 18f).toFloat()
+                )
+                drawLine(
+                    color = CyanRun,
+                    start = Offset(cx, cy),
+                    end = arrowTip,
+                    strokeWidth = 3.5f,
+                    cap = StrokeCap.Round
                 )
 
                 // Runner label
@@ -213,12 +230,35 @@ fun ZombieRadarMap(
                     drawText("🏃 BẠN", cx, cy - 22f, paint)
                 }
 
-                // 6. ZOMBIE HORDE RENDERING (If Zombie mode is active)
+                // 6. REAL STREET ZOMBIE HORDE RENDERING
                 if (zombieState.isEnabled) {
-                    // Map distance (0 to 150m) to radar pixels behind runner (downwards)
-                    val zombieDistClamped = zombieState.distanceMeters.toFloat().coerceIn(4f, 150f)
-                    val zombieDistPx = (zombieDistClamped / 150f) * maxRadius
-                    val zombieCenterY = cy + zombieDistPx
+                    val distM = zombieState.distanceMeters.coerceAtLeast(1.0)
+
+                    val leadChase = StreetChaseEngine.getPointAlongPathBackwards(
+                        pathPoints = pathPoints,
+                        currentLocation = currentLocation,
+                        currentBearing = currentBearing,
+                        distanceBackMeters = distM,
+                        lateralOffsetMeters = 0.0
+                    )
+                    val flank1Chase = StreetChaseEngine.getPointAlongPathBackwards(
+                        pathPoints = pathPoints,
+                        currentLocation = currentLocation,
+                        currentBearing = currentBearing,
+                        distanceBackMeters = distM + 6.0,
+                        lateralOffsetMeters = 1.8
+                    )
+                    val flank2Chase = StreetChaseEngine.getPointAlongPathBackwards(
+                        pathPoints = pathPoints,
+                        currentLocation = currentLocation,
+                        currentBearing = currentBearing,
+                        distanceBackMeters = distM + 12.0,
+                        lateralOffsetMeters = -1.8
+                    )
+
+                    val zLead = toRadarOffset(leadChase.position)
+                    val zFlank1 = toRadarOffset(flank1Chase.position)
+                    val zFlank2 = toRadarOffset(flank2Chase.position)
 
                     val zColor = when (zombieState.alertLevel) {
                         ZombieAlertLevel.DANGER, ZombieAlertLevel.CAUGHT -> DangerRed
@@ -226,51 +266,48 @@ fun ZombieRadarMap(
                         ZombieAlertLevel.SAFE -> Color(0xFFFACC15)
                     }
 
-                    // Zombie horde positions (3 zombies chasing behind in formation)
-                    val zombieOffsets = listOf(
-                        Offset(cx, zombieCenterY),
-                        Offset(cx - 24f, zombieCenterY + 12f),
-                        Offset(cx + 24f, zombieCenterY + 14f)
-                    )
-
-                    // Draw connecting danger line from runner to zombie horde
+                    // Connecting danger threat line from runner to lead zombie
                     drawLine(
                         color = zColor.copy(alpha = 0.6f),
-                        start = Offset(cx, cy + 12f),
-                        end = Offset(cx, zombieCenterY - 14f),
+                        start = Offset(cx, cy),
+                        end = zLead,
                         strokeWidth = 3f,
                         cap = StrokeCap.Round
                     )
 
-                    // Draw Zombies
-                    zombieOffsets.forEach { zOffset ->
+                    // Draw Zombies in formation along the real route
+                    listOf(
+                        Triple(zLead, DangerRed, 18f),
+                        Triple(zFlank1, OrangeBurn, 14f),
+                        Triple(zFlank2, Color(0xFFA855F7), 14f)
+                    ).forEach { (offset, color, rad) ->
                         drawCircle(
-                            color = zColor.copy(alpha = pulseAlpha * 0.4f),
-                            radius = 16f,
-                            center = zOffset
+                            color = color.copy(alpha = pulseAlpha * 0.45f),
+                            radius = rad + (pulseAlpha * 6f),
+                            center = offset
                         )
                         drawCircle(
-                            color = Color(0xFF7F1D1D),
-                            radius = 9f,
-                            center = zOffset
+                            color = Color(0xFF450A0A),
+                            radius = rad * 0.6f,
+                            center = offset
                         )
                         drawCircle(
-                            color = zColor,
-                            radius = 5f,
-                            center = zOffset
+                            color = color,
+                            radius = rad * 0.35f,
+                            center = offset
                         )
                     }
 
-                    // Zombie label text
+                    // Zombie distance label text
                     drawContext.canvas.nativeCanvas.apply {
                         val paint = android.graphics.Paint().apply {
                             color = android.graphics.Color.parseColor(if (zombieState.alertLevel == ZombieAlertLevel.DANGER) "#EF4444" else "#F97316")
-                            textSize = 26f
+                            textSize = 24f
                             textAlign = android.graphics.Paint.Align.CENTER
                             isAntiAlias = true
                             isFakeBoldText = true
                         }
-                        drawText("🧟 ĐÀN ZOMBIE: ${zombieState.distanceMeters.toInt()}m", cx, zombieCenterY + 34f, paint)
+                        drawText("🧟 ${zombieState.distanceMeters.toInt()}m", zLead.x, (zLead.y + 26f).coerceAtMost(h - 10f), paint)
                     }
                 }
             }
@@ -294,7 +331,7 @@ fun ZombieRadarMap(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "RADAR GPS",
+                                text = "RADAR TÁC CHIẾN",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = CyanLight
@@ -308,10 +345,10 @@ fun ZombieRadarMap(
                                         .background(EmeraldPrimary)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text(text = "GPS Tốt", fontSize = 10.sp, color = EmeraldPrimary)
+                                Text(text = "GPS Khóa", fontSize = 10.sp, color = EmeraldPrimary)
                             } else {
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text(text = "(Đang định vị...)", fontSize = 10.sp, color = TextMuted)
+                                Text(text = "(Đang dò...)", fontSize = 10.sp, color = TextMuted)
                             }
                         }
                     }

@@ -38,6 +38,9 @@ class LocationTracker(private val context: Context) : LocationListener {
     private val _currentLocation = MutableStateFlow<Pair<Double, Double>?>(null)
     val currentLocation: StateFlow<Pair<Double, Double>?> = _currentLocation.asStateFlow()
 
+    private val _currentBearing = MutableStateFlow(0f)
+    val currentBearing: StateFlow<Float> = _currentBearing.asStateFlow()
+
     init {
         // Query best last known location immediately upon instantiation
         fetchBestLastKnownLocation()
@@ -150,6 +153,7 @@ class LocationTracker(private val context: Context) : LocationListener {
         _distanceMeters.value = 0.0
         _pathPoints.value = emptyList()
         _currentSpeedMps.value = 0f
+        _currentBearing.value = 0f
         lastLocation = null
     }
 
@@ -167,6 +171,10 @@ class LocationTracker(private val context: Context) : LocationListener {
         // Always update current location pin for map display
         _currentLocation.value = point
 
+        if (location.hasBearing() && location.bearing != 0f) {
+            _currentBearing.value = location.bearing
+        }
+
         if (location.hasSpeed()) {
             _currentSpeedMps.value = location.speed
         }
@@ -180,6 +188,9 @@ class LocationTracker(private val context: Context) : LocationListener {
         val prev = lastLocation
         if (prev != null) {
             val delta = prev.distanceTo(location)
+            if (!location.hasBearing()) {
+                _currentBearing.value = (prev.bearingTo(location) + 360f) % 360f
+            }
             // Filter realistic movement (between 1.0m and 50m per interval)
             if (delta in 1.0..50.0) {
                 _distanceMeters.value += delta

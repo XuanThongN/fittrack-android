@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.graphics.RectF
 import android.graphics.drawable.BitmapDrawable
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -34,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -54,6 +54,8 @@ import com.fittrack.app.ui.theme.DangerRed
 import com.fittrack.app.ui.theme.DarkBackground
 import com.fittrack.app.ui.theme.EmeraldPrimary
 import com.fittrack.app.ui.theme.OrangeBurn
+import com.fittrack.app.util.StreetChaseEngine
+import kotlinx.coroutines.delay
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
@@ -64,14 +66,18 @@ import java.io.File
 
 /**
  * 100% Native OpenStreetMap View powered by osmdroid.
- * Features automatic auto-centering on real user GPS/Network location,
- * live marker tracking, 3-zombie chase pursuit, and accurate positioning.
+ * Features:
+ * - Real Street Route Navigation: Zombies follow the real street polyline traversed by the runner.
+ * - Dynamic Multi-Frame Animation: Running stride animation for Runner & lunging claw attacks for Zombies.
+ * - High accuracy GPS positioning, smooth auto-centering, and offline tile caching.
  */
 @Composable
 fun RealStreetZombieMapView(
     pathPoints: List<Pair<Double, Double>>,
     currentLocation: Pair<Double, Double>?,
+    currentBearing: Float = 0f,
     zombieState: ZombieChaseState,
+    isRunning: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -82,10 +88,19 @@ fun RealStreetZombieMapView(
     val defaultLat = currentLocation?.first ?: 10.7769
     val defaultLng = currentLocation?.second ?: 106.7009
 
+    // Continuous 8 FPS Character Animation Loop (125ms per frame)
+    var animFrame by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(125L)
+            animFrame = (animFrame + 1) % 4
+        }
+    }
+
     // Initialize osmdroid Configuration
     remember {
         Configuration.getInstance().apply {
-            userAgentValue = "FitTrackApp/1.3 (com.fittrack.app; Android)"
+            userAgentValue = "FitTrackApp/1.4 (com.fittrack.app; Android)"
             osmdroidBasePath = File(context.cacheDir, "osmdroid")
             osmdroidTileCache = File(context.cacheDir, "osmdroid/tiles")
         }
@@ -125,8 +140,6 @@ fun RealStreetZombieMapView(
     val runnerMarker = remember {
         Marker(mapView).apply {
             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-            icon = createRunnerMarkerDrawable(context)
-            position = GeoPoint(defaultLat, defaultLng)
             title = "BẠN"
         }
     }
@@ -140,7 +153,7 @@ fun RealStreetZombieMapView(
         }
     }
 
-    // 3 Native Zombie Markers
+    // 3 Native Zombie Markers (Alpha Leader, Flank Stalker, Mutant)
     val zombieLeadMarker = remember {
         Marker(mapView).apply {
             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
@@ -189,20 +202,33 @@ fun RealStreetZombieMapView(
         mapView.invalidate()
     }
 
-    // Live update coordinates, route, and zombies
-    LaunchedEffect(pathPoints, currentLocation, zombieState.distanceMeters, zombieState.isEnabled) {
+    // Live update coordinates, real street route navigation, and animated sprites
+    LaunchedEffect(
+        animFrame,
+        pathPoints,
+        currentLocation,
+        currentBearing,
+        zombieState.distanceMeters,
+        zombieState.isEnabled,
+        isRunning
+    ) {
         if (currentLocation != null) {
             val curLat = currentLocation.first
             val curLng = currentLocation.second
             val runnerGeo = GeoPoint(curLat, curLng)
 
-            // Update runner marker
+            // 1. Update Animated Runner Marker
             runnerMarker.position = runnerGeo
+            runnerMarker.icon = MarkerAnimationFactory.createRunnerFrameDrawable(
+                context = context,
+                frame = animFrame,
+                isMoving = isRunning
+            )
             if (!mapView.overlays.contains(runnerMarker)) {
                 mapView.overlays.add(runnerMarker)
             }
 
-            // Update route polyline
+            // 2. Update Route Polyline
             if (pathPoints.isNotEmpty()) {
                 val geoPoints = pathPoints.map { GeoPoint(it.first, it.second) }
                 routePolyline.setPoints(geoPoints)
@@ -213,30 +239,63 @@ fun RealStreetZombieMapView(
                 }
             }
 
-            // Update Zombie Horde
+            // 3. Update Real Street Zombie Horde Navigation
             if (zombieState.isEnabled) {
                 val distM = zombieState.distanceMeters.coerceAtLeast(1.0)
                 val distRounded = (distM / 5).toInt() * 5
 
-                // Position zombies along real street path behind runner
-                var zLat = curLat - (distM * 0.000009)
-                var zLng = curLng
+                // Zombie 1: Alpha Leader (chases strictly along the center of the real street polyline)
+                val leadChase = StreetChaseEngine.getPointAlongPathBackwards(
+                    pathPoints = pathPoints,
+                    currentLocation = currentLocation,
+                    currentBearing = currentBearing,
+                    distanceBackMeters = distM,
+                    lateralOffsetMeters = 0.0
+                )
+                zombieLeadMarker.position = GeoPoint(leadChase.position.first, leadChase.position.second)
+                zombieLeadMarker.icon = MarkerAnimationFactory.createZombieFrameDrawable(
+                    context = context,
+                    frame = animFrame,
+                    distMeters = distRounded,
+                    alertLevel = zombieState.alertLevel,
+                    zombieType = 0
+                )
 
-                if (pathPoints.size >= 2) {
-                    val backStep = (distM / 15).toInt().coerceAtMost(pathPoints.size - 1)
-                    val targetIdx = (pathPoints.size - 1 - backStep).coerceAtLeast(0)
-                    zLat = pathPoints[targetIdx].first
-                    zLng = pathPoints[targetIdx].second
-                }
+                // Zombie 2: Flank Stalker (chases 5m behind along real street, on right side of road +1.8m)
+                val flank1Dist = distM + 5.0
+                val flank1Chase = StreetChaseEngine.getPointAlongPathBackwards(
+                    pathPoints = pathPoints,
+                    currentLocation = currentLocation,
+                    currentBearing = currentBearing,
+                    distanceBackMeters = flank1Dist,
+                    lateralOffsetMeters = 1.8
+                )
+                zombieFlank1Marker.position = GeoPoint(flank1Chase.position.first, flank1Chase.position.second)
+                zombieFlank1Marker.icon = MarkerAnimationFactory.createZombieFrameDrawable(
+                    context = context,
+                    frame = (animFrame + 1) % 4,
+                    distMeters = ((flank1Dist / 5).toInt() * 5),
+                    alertLevel = zombieState.alertLevel,
+                    zombieType = 1
+                )
 
-                zombieLeadMarker.position = GeoPoint(zLat, zLng)
-                zombieLeadMarker.icon = createZombieMarkerDrawable(context, distRounded)
-
-                zombieFlank1Marker.position = GeoPoint(zLat - 0.00012, zLng + 0.00012)
-                zombieFlank1Marker.icon = createZombieMarkerDrawable(context, (distRounded + 4))
-
-                zombieFlank2Marker.position = GeoPoint(zLat - 0.00012, zLng - 0.00012)
-                zombieFlank2Marker.icon = createZombieMarkerDrawable(context, (distRounded + 8))
+                // Zombie 3: Toxic Mutant (chases 10m behind along real street, on left side of road -1.8m)
+                val flank2Dist = distM + 10.0
+                val flank2Chase = StreetChaseEngine.getPointAlongPathBackwards(
+                    pathPoints = pathPoints,
+                    currentLocation = currentLocation,
+                    currentBearing = currentBearing,
+                    distanceBackMeters = flank2Dist,
+                    lateralOffsetMeters = -1.8
+                )
+                zombieFlank2Marker.position = GeoPoint(flank2Chase.position.first, flank2Chase.position.second)
+                zombieFlank2Marker.icon = MarkerAnimationFactory.createZombieFrameDrawable(
+                    context = context,
+                    frame = (animFrame + 2) % 4,
+                    distMeters = ((flank2Dist / 5).toInt() * 5),
+                    alertLevel = zombieState.alertLevel,
+                    zombieType = 2
+                )
 
                 if (!mapView.overlays.contains(zombieLeadMarker)) mapView.overlays.add(zombieLeadMarker)
                 if (!mapView.overlays.contains(zombieFlank1Marker)) mapView.overlays.add(zombieFlank1Marker)
@@ -247,7 +306,6 @@ fun RealStreetZombieMapView(
                 mapView.overlays.remove(zombieFlank2Marker)
             }
         } else {
-            // While GPS is searching, remove runner and zombie overlays from default map
             mapView.overlays.remove(runnerMarker)
             mapView.overlays.remove(zombieLeadMarker)
             mapView.overlays.remove(zombieFlank1Marker)
@@ -260,7 +318,7 @@ fun RealStreetZombieMapView(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(220.dp)
+            .height(230.dp)
             .clip(RoundedCornerShape(20.dp))
             .background(CardSurface)
     ) {
@@ -423,96 +481,6 @@ fun RealStreetZombieMapView(
             }
         }
     }
-}
-
-/**
- * Creates custom BitmapDrawable for Runner Pin (🏃 BẠN)
- */
-private fun createRunnerMarkerDrawable(context: Context): BitmapDrawable {
-    val sizePx = 100
-    val bitmap = Bitmap.createBitmap(sizePx, sizePx + 24, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-
-    // Outer cyan glow
-    paint.color = android.graphics.Color.parseColor("#4D06B6D4")
-    canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f, paint)
-
-    // Cyan solid circle
-    paint.color = android.graphics.Color.parseColor("#06B6D4")
-    canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f - 8f, paint)
-
-    // White outline
-    paint.color = android.graphics.Color.WHITE
-    paint.style = Paint.Style.STROKE
-    paint.strokeWidth = 5f
-    canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f - 8f, paint)
-
-    // Runner Emoji
-    paint.style = Paint.Style.FILL
-    paint.textSize = 36f
-    paint.textAlign = Paint.Align.CENTER
-    val fontMetrics = paint.fontMetrics
-    val textY = (sizePx / 2f) - (fontMetrics.ascent + fontMetrics.descent) / 2
-    canvas.drawText("🏃", sizePx / 2f, textY, paint)
-
-    // Badge "BẠN"
-    val pillRect = RectF(sizePx / 2f - 32f, sizePx.toFloat() - 4f, sizePx / 2f + 32f, (sizePx + 22).toFloat())
-    paint.color = android.graphics.Color.parseColor("#E60F172A")
-    canvas.drawRoundRect(pillRect, 6f, 6f, paint)
-
-    paint.color = android.graphics.Color.parseColor("#06B6D4")
-    paint.textSize = 17f
-    paint.isFakeBoldText = true
-    canvas.drawText("BẠN", sizePx / 2f, (sizePx + 15).toFloat(), paint)
-
-    return BitmapDrawable(context.resources, bitmap)
-}
-
-/**
- * Creates custom BitmapDrawable for Zombie Marker (🧟 XXm)
- */
-private fun createZombieMarkerDrawable(context: Context, distM: Int): BitmapDrawable {
-    val sizePx = 90
-    val bitmap = Bitmap.createBitmap(sizePx, sizePx + 22, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-
-    // Outer red glow
-    paint.color = android.graphics.Color.parseColor("#4DEF4444")
-    canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f, paint)
-
-    // Red solid circle
-    paint.color = android.graphics.Color.parseColor("#EF4444")
-    canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f - 6f, paint)
-
-    // White outline
-    paint.color = android.graphics.Color.WHITE
-    paint.style = Paint.Style.STROKE
-    paint.strokeWidth = 4f
-    canvas.drawCircle(sizePx / 2f, sizePx / 2f, sizePx / 2f - 6f, paint)
-
-    // Zombie Emoji
-    paint.style = Paint.Style.FILL
-    paint.textSize = 32f
-    paint.textAlign = Paint.Align.CENTER
-    val fontMetrics = paint.fontMetrics
-    val textY = (sizePx / 2f) - (fontMetrics.ascent + fontMetrics.descent) / 2
-    canvas.drawText("🧟", sizePx / 2f, textY, paint)
-
-    // Badge distance (e.g. "80m")
-    val pillRect = RectF(sizePx / 2f - 30f, sizePx.toFloat() - 4f, sizePx / 2f + 30f, (sizePx + 20).toFloat())
-    paint.color = android.graphics.Color.parseColor("#EF4444")
-    canvas.drawRoundRect(pillRect, 6f, 6f, paint)
-
-    paint.color = android.graphics.Color.WHITE
-    paint.textSize = 16f
-    paint.isFakeBoldText = true
-    canvas.drawText("${distM}m", sizePx / 2f, (sizePx + 14).toFloat(), paint)
-
-    return BitmapDrawable(context.resources, bitmap)
 }
 
 /**

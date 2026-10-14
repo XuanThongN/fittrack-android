@@ -118,6 +118,7 @@ fun RunScreen(
     val gpsDistanceMeters by locationTracker.distanceMeters.collectAsState()
     val pathPoints by locationTracker.pathPoints.collectAsState()
     val currentLocation by locationTracker.currentLocation.collectAsState()
+    val currentBearing by locationTracker.currentBearing.collectAsState()
 
     val totalDistanceMeters = if (gpsDistanceMeters > 0) gpsDistanceMeters else manualDistanceMeters
     val distanceKm = totalDistanceMeters / 1000.0
@@ -360,20 +361,24 @@ fun RunScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Display selected Map View (Compact 220dp)
+        // Display selected Map View (Compact 230dp)
         if (mapMode == "street") {
             RealStreetZombieMapView(
                 pathPoints = pathPoints,
                 currentLocation = currentLocation,
+                currentBearing = currentBearing,
                 zombieState = zombieState,
+                isRunning = isRunning && !isPaused,
                 modifier = Modifier.fillMaxWidth()
             )
         } else {
             ZombieRadarMap(
                 pathPoints = pathPoints,
                 currentLocation = currentLocation,
+                currentBearing = currentBearing,
                 zombieState = zombieState,
                 runnerSpeedKmh = runnerSpeedKmh,
+                isRunning = isRunning && !isPaused,
                 modifier = Modifier.fillMaxWidth()
             )
         }
