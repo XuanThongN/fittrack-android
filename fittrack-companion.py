@@ -208,9 +208,19 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div id="workoutList"></div>
     </div>
 
-    <div class="card">
-        <h3 style="margin-bottom: 12px;">🏃 Buổi Chạy Bộ</h3>
-        <div id="runList"></div>
+    <div class="card" style="border: 1px solid #EF4444; background: rgba(239, 68, 68, 0.08);">
+        <h3 style="color: #EF4444; margin-bottom: 8px;">🧟 Chế Độ Zombie Rượt Đuổi (Sinh Tồn)</h3>
+        <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">Đàn zombie đang rượt đuổi bạn phía sau 80m. Duy trì tốc độ để không bị bắt!</p>
+        <div style="display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 6px;">
+            <span>Khoảng cách an toàn:</span>
+            <span style="color: #EF4444;" id="zombieDist">80 mét</span>
+        </div>
+        <div class="progress-bar-bg">
+            <div class="progress-bar-fill" id="zombieBar" style="width: 70%; background: #EF4444;"></div>
+        </div>
+        <div style="font-size: 11px; color: var(--muted); text-align: center; margin-top: 6px;">
+            ⚠️ Hãy mở App Android FitTrack để trải nghiệm Radar quét vệ tinh và giọng nói cảnh báo khẩn cấp!
+        </div>
     </div>
 
     <script>

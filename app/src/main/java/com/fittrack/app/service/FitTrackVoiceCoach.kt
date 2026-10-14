@@ -53,6 +53,27 @@ class FitTrackVoiceCoach(context: Context) : TextToSpeech.OnInitListener {
         speak("Xuất sắc! Buổi tập đã hoàn thành. Bạn đã đốt cháy $calories calo.")
     }
 
+    // ZOMBIE CHASE AUDIO ALERTS
+    fun speakZombieStart(difficultyTitle: String) {
+        speak("Kích hoạt chế độ sinh tồn! Đàn $difficultyTitle đang ở sau lưng bạn 80 mét. Chạy ngay, đừng dừng lại!")
+    }
+
+    fun speakZombieApproaching(meters: Int) {
+        speak("Cảnh báo! Zombie cách $meters mét! Tăng tốc ngay!")
+    }
+
+    fun speakZombieDanger() {
+        speak("Nguy hiểm cực độ! Zombie ngay sát sau lưng, bứt tốc ngay!")
+    }
+
+    fun speakZombieEscaped() {
+        speak("Rất tốt! Bạn vừa bứt tốc nới rộng khoảng cách an toàn!")
+    }
+
+    fun speakZombieCaught() {
+        speak("Bạn đã bị zombie bắt kịp! Tăng tốc thoát hiểm ngay lập tức!")
+    }
+
     fun destroy() {
         try {
             tts?.stop()
