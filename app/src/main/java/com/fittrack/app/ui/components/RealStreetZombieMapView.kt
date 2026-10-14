@@ -70,32 +70,31 @@ import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 import java.io.File
 
-// High-speed, unblocked OpenStreetMap raster tile sources hosted on global CDNs with <10ms latency in Asia
-private val CartoVoyagerTileSource = XYTileSource(
-    "CartoVoyager",
+// 100% Free, NO API KEY required OpenStreetMap tile providers (no watermark, unblocked):
+// 1. OSM HOT: High-contrast Humanitarian OpenStreetMap with clear Vietnamese street names and buildings
+private val OsmHotTileSource = XYTileSource(
+    "OSM_HOT",
     1,
-    20,
+    19,
     256,
     ".png",
     arrayOf(
-        "https://a.basemaps.cartocdn.com/rastertiles/voyager/",
-        "https://b.basemaps.cartocdn.com/rastertiles/voyager/",
-        "https://c.basemaps.cartocdn.com/rastertiles/voyager/",
-        "https://d.basemaps.cartocdn.com/rastertiles/voyager/"
+        "https://a.tile.openstreetmap.fr/hot/",
+        "https://b.tile.openstreetmap.fr/hot/"
     )
 )
 
-private val CartoDarkTileSource = XYTileSource(
-    "CartoDark",
+// 2. CyclOSM: Dedicated running, walking and cycling map with trails, pedestrian ways, and parks
+private val CyclOsmTileSource = XYTileSource(
+    "CyclOSM",
     1,
-    20,
+    18,
     256,
     ".png",
     arrayOf(
-        "https://a.basemaps.cartocdn.com/rastertiles/dark_all/",
-        "https://b.basemaps.cartocdn.com/rastertiles/dark_all/",
-        "https://c.basemaps.cartocdn.com/rastertiles/dark_all/",
-        "https://d.basemaps.cartocdn.com/rastertiles/dark_all/"
+        "https://a.tile-cyclosm.openstreetmap.fr/cyclosm/",
+        "https://b.tile-cyclosm.openstreetmap.fr/cyclosm/",
+        "https://c.tile-cyclosm.openstreetmap.fr/cyclosm/"
     )
 )
 
@@ -137,20 +136,24 @@ fun RealStreetZombieMapView(
         }
     }
 
-    // Initialize osmdroid Configuration
+    // Initialize osmdroid Configuration & cleanup any old watermarked Carto tiles
     remember {
         Configuration.getInstance().apply {
-            userAgentValue = "FitTrackApp/1.6.1 (com.fittrack.app; Android)"
+            userAgentValue = "FitTrackApp/1.6.2 (com.fittrack.app; Android)"
             osmdroidBasePath = File(context.cacheDir, "osmdroid")
             osmdroidTileCache = File(context.cacheDir, "osmdroid/tiles")
         }
+        try {
+            File(context.cacheDir, "osmdroid/tiles/CartoVoyager").deleteRecursively()
+            File(context.cacheDir, "osmdroid/tiles/CartoDark").deleteRecursively()
+        } catch (_: Exception) {}
     }
 
     // Retain native MapView and its overlays
     val mapView = remember {
         MapView(context).apply {
             clipToOutline = true
-            setTileSource(CartoVoyagerTileSource)
+            setTileSource(OsmHotTileSource)
             setMultiTouchControls(true)
             isTilesScaledToDpi = true
             controller.setZoom(17.5)
@@ -249,11 +252,11 @@ fun RealStreetZombieMapView(
         }
     }
 
-    // Switch Tile Source (0: Carto Voyager, 1: Carto Dark, 2: OpenTopo)
+    // Switch Tile Source (0: OSM HOT Streets, 1: CyclOSM Running Trails, 2: OpenTopo)
     LaunchedEffect(layerMode) {
         val tileSource = when (layerMode) {
-            0 -> CartoVoyagerTileSource
-            1 -> CartoDarkTileSource
+            0 -> OsmHotTileSource
+            1 -> CyclOsmTileSource
             else -> TileSourceFactory.OpenTopo
         }
         mapView.setTileSource(tileSource)
@@ -450,7 +453,7 @@ fun RealStreetZombieMapView(
                     Text(
                         text = when (layerMode) {
                             0 -> "Đường Phố"
-                            1 -> "Bản Đồ Đêm"
+                            1 -> "Đường Chạy Bộ"
                             else -> "Địa Hình"
                         },
                         fontSize = 11.sp,
