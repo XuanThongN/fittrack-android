@@ -63,11 +63,41 @@ import com.fittrack.app.util.StreetChaseEngine
 import kotlinx.coroutines.delay
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 import java.io.File
+
+// High-speed, unblocked OpenStreetMap raster tile sources hosted on global CDNs with <10ms latency in Asia
+private val CartoVoyagerTileSource = XYTileSource(
+    "CartoVoyager",
+    1,
+    20,
+    256,
+    ".png",
+    arrayOf(
+        "https://a.basemaps.cartocdn.com/rastertiles/voyager/",
+        "https://b.basemaps.cartocdn.com/rastertiles/voyager/",
+        "https://c.basemaps.cartocdn.com/rastertiles/voyager/",
+        "https://d.basemaps.cartocdn.com/rastertiles/voyager/"
+    )
+)
+
+private val CartoDarkTileSource = XYTileSource(
+    "CartoDark",
+    1,
+    20,
+    256,
+    ".png",
+    arrayOf(
+        "https://a.basemaps.cartocdn.com/rastertiles/dark_all/",
+        "https://b.basemaps.cartocdn.com/rastertiles/dark_all/",
+        "https://c.basemaps.cartocdn.com/rastertiles/dark_all/",
+        "https://d.basemaps.cartocdn.com/rastertiles/dark_all/"
+    )
+)
 
 /**
  * 100% Native OpenStreetMap View powered by osmdroid.
@@ -87,7 +117,7 @@ fun RealStreetZombieMapView(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var isTopoLayer by remember { mutableStateOf(false) }
+    var layerMode by remember { mutableIntStateOf(0) } // 0: Carto Voyager, 1: Carto Dark, 2: OpenTopo
     var hasAutoCentered by remember { mutableStateOf(false) }
 
     // Pre-fetched real OpenStreetMap street prefix nodes from RunningSessionManager (Single source of truth)
@@ -110,7 +140,7 @@ fun RealStreetZombieMapView(
     // Initialize osmdroid Configuration
     remember {
         Configuration.getInstance().apply {
-            userAgentValue = "FitTrackApp/1.4 (com.fittrack.app; Android)"
+            userAgentValue = "FitTrackApp/1.6.1 (com.fittrack.app; Android)"
             osmdroidBasePath = File(context.cacheDir, "osmdroid")
             osmdroidTileCache = File(context.cacheDir, "osmdroid/tiles")
         }
@@ -119,7 +149,8 @@ fun RealStreetZombieMapView(
     // Retain native MapView and its overlays
     val mapView = remember {
         MapView(context).apply {
-            setTileSource(TileSourceFactory.MAPNIK)
+            clipToOutline = true
+            setTileSource(CartoVoyagerTileSource)
             setMultiTouchControls(true)
             isTilesScaledToDpi = true
             controller.setZoom(17.5)
@@ -142,7 +173,6 @@ fun RealStreetZombieMapView(
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             mapView.onPause()
-            mapView.onDetach()
         }
     }
 
@@ -213,27 +243,30 @@ fun RealStreetZombieMapView(
                 mapView.controller.setZoom(17.5)
                 hasAutoCentered = true
             }
+            if (streetPrefix.isEmpty()) {
+                RunningSessionManager.fetchStreetPrefixIfAvailable()
+            }
         }
     }
 
-    // Switch Tile Source (Mapnik Standard Street vs OpenTopo)
-    LaunchedEffect(isTopoLayer) {
-        if (isTopoLayer) {
-            mapView.setTileSource(TileSourceFactory.OpenTopo)
-        } else {
-            mapView.setTileSource(TileSourceFactory.MAPNIK)
+    // Switch Tile Source (0: Carto Voyager, 1: Carto Dark, 2: OpenTopo)
+    LaunchedEffect(layerMode) {
+        val tileSource = when (layerMode) {
+            0 -> CartoVoyagerTileSource
+            1 -> CartoDarkTileSource
+            else -> TileSourceFactory.OpenTopo
         }
+        mapView.setTileSource(tileSource)
         mapView.invalidate()
     }
 
     // Heading rotation (Compass mode)
     LaunchedEffect(currentBearing, isFollowBearing) {
-        if (isFollowBearing && currentBearing != 0f) {
-            mapView.mapOrientation = -currentBearing
-        } else {
-            mapView.mapOrientation = 0f
+        val targetOrientation = if (isFollowBearing && currentBearing != 0f) -currentBearing else 0f
+        if (mapView.mapOrientation != targetOrientation) {
+            mapView.setMapOrientation(targetOrientation, false)
+            mapView.invalidate()
         }
-        mapView.invalidate()
     }
 
     // Live update coordinates, real street route navigation, and animated sprites
@@ -398,13 +431,13 @@ fun RealStreetZombieMapView(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Layer switch pill: OSM Street vs Topo
+                // Layer switch pill: Voyager -> Dark -> Topo
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .clip(RoundedCornerShape(10.dp))
                         .background(DarkBackground.copy(alpha = 0.92f))
-                        .clickable { isTopoLayer = !isTopoLayer }
+                        .clickable { layerMode = (layerMode + 1) % 3 }
                         .padding(horizontal = 10.dp, vertical = 6.dp)
                 ) {
                     Icon(
@@ -415,7 +448,11 @@ fun RealStreetZombieMapView(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = if (isTopoLayer) "Địa Hình" else "OpenStreetMap",
+                        text = when (layerMode) {
+                            0 -> "Đường Phố"
+                            1 -> "Bản Đồ Đêm"
+                            else -> "Địa Hình"
+                        },
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White

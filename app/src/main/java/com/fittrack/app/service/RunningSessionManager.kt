@@ -101,6 +101,7 @@ object RunningSessionManager {
                 isMuted = _isMuted.value
             }
         }
+        fetchStreetPrefixIfAvailable()
     }
 
     fun startRun(context: Context, isZombieMode: Boolean = true, difficulty: ZombieDifficulty = ZombieDifficulty.RUNNER) {
@@ -125,6 +126,7 @@ object RunningSessionManager {
         if (locationTracker?.hasPermission() == true) {
             locationTracker?.startTracking()
         }
+        fetchStreetPrefixIfAvailable()
 
         // Start Android Foreground Service with live notification
         val serviceIntent = Intent(appContext, RunningTrackerService::class.java).apply {
