@@ -941,7 +941,7 @@ fun PostRunSummaryDialog(
                     }
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
                         Text(text = "⚡ Pace TB", fontSize = 11.sp, color = TextMuted)
-                        Text(text = run.averagePaceFormatted(), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = EmeraldPrimary)
+                        Text(text = run.paceFormatted(), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = EmeraldPrimary)
                     }
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
                         Text(text = "🔥 Calo", fontSize = 11.sp, color = TextMuted)
