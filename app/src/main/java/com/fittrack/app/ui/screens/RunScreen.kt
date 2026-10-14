@@ -26,6 +26,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DirectionsRun
 import androidx.compose.material.icons.filled.LocalFireDepartment
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Speed
@@ -112,6 +114,7 @@ fun RunScreen(
     val zombieState by RunningSessionManager.zombieState.collectAsState()
     val mapMode by RunningSessionManager.mapMode.collectAsState()
     val isMuted by RunningSessionManager.isMuted.collectAsState()
+    val keepScreenOn by RunningSessionManager.keepScreenOn.collectAsState()
 
     val locationTracker = RunningSessionManager.locationTracker
     val gpsDistanceMeters by locationTracker?.distanceMeters?.collectAsState() ?: remember { mutableDoubleStateOf(0.0) }
@@ -209,6 +212,15 @@ fun RunScreen(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // Screen On & Lock Screen toggle button
+                IconButton(onClick = { RunningSessionManager.toggleKeepScreenOn() }) {
+                    Icon(
+                        imageVector = if (keepScreenOn) Icons.Default.LockOpen else Icons.Default.Lock,
+                        contentDescription = "Màn hình khóa & Luôn sáng",
+                        tint = if (keepScreenOn) EmeraldPrimary else TextMuted
+                    )
+                }
+
                 // Quick Manual Input button
                 IconButton(onClick = { showManualDialog = true }) {
                     Icon(
@@ -307,7 +319,59 @@ fun RunScreen(
             )
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Lock Screen Display Status & Screen Always On Toggle
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 6.dp),
+            colors = CardDefaults.cardColors(containerColor = CardSurface),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { RunningSessionManager.toggleKeepScreenOn() }
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (keepScreenOn) "📱" else "🔒",
+                        fontSize = 18.sp
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Xem Bản Đồ Trên Màn Hình Khóa",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = if (keepScreenOn) "Màn hình luôn sáng khi đang chạy" else "Bật màn hình là thấy ngay bản đồ (không cần mở khóa)",
+                            fontSize = 11.sp,
+                            color = if (keepScreenOn) EmeraldPrimary else TextSecondary
+                        )
+                    }
+                }
+                Switch(
+                    checked = keepScreenOn,
+                    onCheckedChange = { RunningSessionManager.setKeepScreenOn(it) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = EmeraldPrimary,
+                        checkedTrackColor = EmeraldPrimary.copy(alpha = 0.35f)
+                    )
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
 
         // ==========================================
         // PRIMARY ACTION BUTTON BAR (START / PAUSE / STOP)

@@ -67,6 +67,9 @@ object RunningSessionManager {
     private val _isMuted = MutableStateFlow(false)
     val isMuted: StateFlow<Boolean> = _isMuted.asStateFlow()
 
+    private val _keepScreenOn = MutableStateFlow(true)
+    val keepScreenOn: StateFlow<Boolean> = _keepScreenOn.asStateFlow()
+
     // Triggers for notification updates and UI event callbacks
     private val _sessionUpdateTrigger = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val sessionUpdateTrigger: SharedFlow<Unit> = _sessionUpdateTrigger.asSharedFlow()
@@ -264,6 +267,14 @@ object RunningSessionManager {
     fun toggleMute() {
         _isMuted.value = !_isMuted.value
         voiceCoach?.isMuted = _isMuted.value
+    }
+
+    fun toggleKeepScreenOn() {
+        _keepScreenOn.value = !_keepScreenOn.value
+    }
+
+    fun setKeepScreenOn(enabled: Boolean) {
+        _keepScreenOn.value = enabled
     }
 
     fun getTotalDistanceMeters(): Double {

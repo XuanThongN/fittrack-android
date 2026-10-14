@@ -124,18 +124,43 @@ class RunningTrackerService : Service() {
             distKm, timeStr, speedKmh
         )
 
+        val detailedBigText = buildString {
+            append("⏱️ Thời gian: ").append(timeStr)
+            append("  |  📏 ").append(String.format(Locale.US, "%.2f km", distKm))
+            append("\n⚡ Tốc độ: ").append(String.format(Locale.US, "%.1f km/h", speedKmh))
+            if (zombie.isEnabled) {
+                append("\n🧟 Zombie đuổi: ").append(zombie.distanceMeters.toInt()).append("m (").append(zombie.difficulty.title).append(")")
+            }
+        }
+
+        val stopIntent = Intent(this, RunningTrackerService::class.java).apply {
+            action = ACTION_STOP
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            this, 2, stopIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(contentText)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(detailedBigText))
             .setSmallIcon(R.drawable.ic_run_notification)
             .setContentIntent(openAppPendingIntent)
             .setOngoing(!isPaused)
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setCategory(NotificationCompat.CATEGORY_WORKOUT)
             .addAction(
                 if (isPaused) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause,
                 if (isPaused) "Tiếp tục" else "Tạm dừng",
                 pauseResumePendingIntent
+            )
+            .addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                "Kết thúc",
+                stopPendingIntent
             )
 
         return builder.build()
