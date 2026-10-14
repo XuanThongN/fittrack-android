@@ -235,6 +235,7 @@ fun ZombieRadarMap(
                     val distM = zombieState.distanceMeters.coerceAtLeast(1.0)
 
                     val leadChase = StreetChaseEngine.getPointAlongPathBackwards(
+                        streetPrefix = emptyList(),
                         pathPoints = pathPoints,
                         currentLocation = currentLocation,
                         currentBearing = currentBearing,
@@ -242,6 +243,7 @@ fun ZombieRadarMap(
                         lateralOffsetMeters = 0.0
                     )
                     val flank1Chase = StreetChaseEngine.getPointAlongPathBackwards(
+                        streetPrefix = emptyList(),
                         pathPoints = pathPoints,
                         currentLocation = currentLocation,
                         currentBearing = currentBearing,
@@ -249,6 +251,7 @@ fun ZombieRadarMap(
                         lateralOffsetMeters = 1.8
                     )
                     val flank2Chase = StreetChaseEngine.getPointAlongPathBackwards(
+                        streetPrefix = emptyList(),
                         pathPoints = pathPoints,
                         currentLocation = currentLocation,
                         currentBearing = currentBearing,

@@ -4,243 +4,302 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.RadialGradient
 import android.graphics.RectF
+import android.graphics.Shader
 import android.graphics.drawable.BitmapDrawable
 import com.fittrack.app.data.model.ZombieAlertLevel
 
 /**
- * Generates frame-by-frame animated vector sprites for both Runner and Zombie Horde.
- * Provides lively running stride cycles, lunging claw attacks, pulsing aura rings,
- * and high-visibility status badges.
+ * High-End Vector Animation Factory for Runner and Zombie Horde.
+ * Produces polished, high-resolution, game-quality animated character sprites
+ * with layered lighting, aerodynamic athletic silhouettes, terrifying monster lunges,
+ * pulsing shockwave auras, and glassmorphism HUD badges.
  */
 object MarkerAnimationFactory {
 
     /**
-     * Creates an animated frame for the Runner character.
-     *
-     * @param frame Current animation step [0..3].
-     * @param isMoving Whether the runner is actively moving (sprinting) vs idle.
+     * Generates a high-definition animated frame for the Runner character.
      */
     fun createRunnerFrameDrawable(
         context: Context,
         frame: Int,
         isMoving: Boolean
     ): BitmapDrawable {
-        val w = 110
-        val h = 130
+        val w = 130
+        val h = 156
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
         val cx = w / 2f
-        val cy = 48f
+        val cy = 54f
 
-        // 1. Pulsing Cyan Energy Aura
-        val pulseRadius = if (isMoving) 38f + (frame * 2.5f) else 38f
-        val pulsePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#4006B6D4")
-            style = Paint.Style.STROKE
-            strokeWidth = 3.5f
-        }
-        canvas.drawCircle(cx, cy, pulseRadius, pulsePaint)
-
-        // Dark circular base badge
-        val basePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#0F172A")
+        // 1. Dynamic Ground Contact Shadow (squashes and stretches with stride bounce)
+        val shadowW = if (isMoving && (frame == 1 || frame == 3)) 18f else 26f
+        val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#4D000000")
             style = Paint.Style.FILL
         }
-        canvas.drawCircle(cx, cy, 34f, basePaint)
+        canvas.drawOval(cx - shadowW, cy + 34f, cx + shadowW, cy + 42f, shadowPaint)
 
-        val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#06B6D4")
+        // 2. Dual Concentric Cyan Pulse Rings
+        val pulse1 = if (isMoving) 38f + (frame * 3.5f) else 38f
+        val pulsePaint1 = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#00F0FF")
+            alpha = (140 - frame * 30).coerceIn(20, 140)
+            style = Paint.Style.STROKE
+            strokeWidth = 3f
+        }
+        canvas.drawCircle(cx, cy, pulse1, pulsePaint1)
+
+        val pulse2 = pulse1 - 8f
+        if (pulse2 > 26f) {
+            val pulsePaint2 = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#06B6D4")
+                alpha = (90 - frame * 20).coerceIn(10, 90)
+                style = Paint.Style.STROKE
+                strokeWidth = 2f
+            }
+            canvas.drawCircle(cx, cy, pulse2, pulsePaint2)
+        }
+
+        // 3. Cybernetic Hologram Base Disc
+        val discRadius = 33f
+        val discPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = RadialGradient(
+                cx, cy, discRadius,
+                intArrayOf(Color.parseColor("#1E293B"), Color.parseColor("#0F172A")),
+                floatArrayOf(0.4f, 1.0f),
+                Shader.TileMode.CLAMP
+            )
+            style = Paint.Style.FILL
+        }
+        canvas.drawCircle(cx, cy, discRadius, discPaint)
+
+        val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#00F0FF")
             style = Paint.Style.STROKE
             strokeWidth = 3.5f
         }
-        canvas.drawCircle(cx, cy, 34f, ringPaint)
+        canvas.drawCircle(cx, cy, discRadius, rimPaint)
 
-        // 2. Athletic Motion Blur / Speed Lines (when moving)
+        // Glowing tick marks at 4 cardinal notches
+        val tickPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#38BDF8")
+            strokeWidth = 2.5f
+        }
+        canvas.drawLine(cx, cy - discRadius - 2f, cx, cy - discRadius + 4f, tickPaint)
+        canvas.drawLine(cx, cy + discRadius - 4f, cx, cy + discRadius + 2f, tickPaint)
+        canvas.drawLine(cx - discRadius - 2f, cy, cx - discRadius + 4f, cy, tickPaint)
+        canvas.drawLine(cx + discRadius - 4f, cy, cx + discRadius + 2f, cy, tickPaint)
+
+        // 4. Athletic Speed Blur Ribbons (Trailing motion streaks)
         if (isMoving) {
-            val speedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#8022D3EE")
-                strokeWidth = 2.5f
+            val ribbonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#00F0FF")
+                strokeWidth = 3f
                 strokeCap = Paint.Cap.ROUND
+                alpha = if (frame % 2 == 0) 160 else 90
             }
-            val offset = (frame % 2) * 3f
-            canvas.drawLine(cx - 22f, cy - 6f + offset, cx - 32f, cy - 6f + offset, speedPaint)
-            canvas.drawLine(cx - 24f, cy + 4f - offset, cx - 36f, cy + 4f - offset, speedPaint)
-            canvas.drawLine(cx - 20f, cy + 14f + offset, cx - 30f, cy + 14f + offset, speedPaint)
+            val bobShift = if (frame == 1 || frame == 3) -4f else 1f
+            canvas.drawLine(cx - 20f, cy - 8f + bobShift, cx - 34f, cy - 8f + bobShift, ribbonPaint)
+            canvas.drawLine(cx - 24f, cy + 4f + bobShift, cx - 40f, cy + 4f + bobShift, ribbonPaint)
+            canvas.drawLine(cx - 18f, cy + 16f + bobShift, cx - 30f, cy + 16f + bobShift, ribbonPaint)
         }
 
-        // 3. Animated Runner Humanoid Figure
+        // 5. Stylized Athletic Runner Character
         val bobY = if (isMoving) {
             when (frame) {
-                1, 3 -> -3f // airborne bounce mid-stride
-                else -> 1f  // foot impact
+                1, 3 -> -4f // high bounce airborne float
+                else -> 1f  // ground impact
             }
         } else 0f
 
+        // Head & Visor
+        val headCx = cx
+        val headCy = cy - 16f + bobY
         val skinPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#FDBA74") // healthy warm skin
+            color = Color.parseColor("#FDBA74")
             style = Paint.Style.FILL
         }
+        canvas.drawCircle(headCx, headCy, 8f, skinPaint)
+
+        // Aerodynamic Hair & Sleek Neon Sunglasses
         val hairPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#1E293B")
+            color = Color.parseColor("#0F172A")
             style = Paint.Style.FILL
         }
-        val headbandPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#22D3EE")
-            strokeWidth = 3f
+        canvas.drawArc(RectF(headCx - 8f, headCy - 9f, headCx + 8f, headCy + 2f), 180f, 180f, true, hairPaint)
+
+        val visorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#00F0FF")
+            style = Paint.Style.FILL
+        }
+        canvas.drawRoundRect(RectF(headCx - 7f, headCy - 2.5f, headCx + 6f, headCy + 1.5f), 2f, 2f, visorPaint)
+
+        // Athletic Torso (Curved aerodynamic running tank top)
+        val chestY = headCy + 9f
+        val waistY = chestY + 16f
+        val torsoPath = Path().apply {
+            moveTo(headCx - 7f, chestY)
+            lineTo(headCx + 8f, chestY)
+            lineTo(headCx + 5f, waistY)
+            lineTo(headCx - 5f, waistY)
+            close()
+        }
+        val jerseyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = LinearGradient(
+                headCx, chestY, headCx, waistY,
+                Color.parseColor("#22D3EE"), Color.parseColor("#0284C7"),
+                Shader.TileMode.CLAMP
+            )
+            style = Paint.Style.FILL
+        }
+        canvas.drawPath(torsoPath, jerseyPaint)
+
+        // Reflective chest stripe
+        val sashPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            strokeWidth = 2f
             style = Paint.Style.STROKE
         }
-        val shirtPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#06B6D4")
-            style = Paint.Style.FILL
-        }
-        val limbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            strokeWidth = 4f
+        canvas.drawLine(headCx - 5f, chestY + 2f, headCx + 3f, waistY - 2f, sashPaint)
+
+        // Muscular Running Limbs (Legs & Arms Stride Cycle)
+        val legPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            strokeWidth = 5.5f
             strokeCap = Paint.Cap.ROUND
+            color = Color.parseColor("#0F172A")
+            style = Paint.Style.STROKE
+        }
+        val legStripePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            strokeWidth = 1.8f
+            strokeCap = Paint.Cap.ROUND
+            color = Color.parseColor("#38BDF8")
+            style = Paint.Style.STROKE
+        }
+        val armPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            strokeWidth = 4.5f
+            strokeCap = Paint.Cap.ROUND
+            color = Color.parseColor("#FDBA74")
             style = Paint.Style.STROKE
         }
         val shoePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#FACC15") // bright yellow running shoes
+            color = Color.parseColor("#FACC15") // neon racing yellow
             style = Paint.Style.FILL
         }
-
-        // Head
-        val headY = cy - 14f + bobY
-        canvas.drawCircle(cx, headY, 7.5f, skinPaint)
-        // Hair & Headband
-        canvas.drawArc(RectF(cx - 8f, headY - 8f, cx + 8f, headY + 3f), 180f, 180f, true, hairPaint)
-        canvas.drawLine(cx - 7f, headY - 2f, cx + 7f, headY - 2f, headbandPaint)
-
-        // Torso (leaning forward)
-        val chestTopY = headY + 8f
-        val hipY = chestTopY + 14f
-        val torsoPath = Path().apply {
-            moveTo(cx - 6f, chestTopY)
-            lineTo(cx + 6f, chestTopY)
-            lineTo(cx + 4f, hipY)
-            lineTo(cx - 4f, hipY)
-            close()
+        val shoeSolePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            strokeWidth = 2f
+            style = Paint.Style.STROKE
         }
-        canvas.drawPath(torsoPath, shirtPaint)
 
-        // Animated Limbs (Legs & Arms Stride Cycle)
         if (isMoving) {
             when (frame) {
                 0 -> {
-                    // Right leg forward, left leg back
-                    limbPaint.color = Color.parseColor("#38BDF8")
-                    // Right leg (front)
-                    canvas.drawLine(cx + 2f, hipY, cx + 8f, hipY + 8f, limbPaint)
-                    canvas.drawLine(cx + 8f, hipY + 8f, cx + 14f, hipY + 16f, limbPaint)
-                    canvas.drawCircle(cx + 14f, hipY + 16f, 3f, shoePaint)
+                    // Right leg drives forward with high knee
+                    canvas.drawLine(headCx + 2f, waistY, headCx + 10f, waistY + 8f, legPaint)
+                    canvas.drawLine(headCx + 10f, waistY + 8f, headCx + 16f, waistY + 17f, legPaint)
+                    canvas.drawLine(headCx + 10f, waistY + 8f, headCx + 16f, waistY + 17f, legStripePaint)
+                    canvas.drawCircle(headCx + 16f, waistY + 17f, 3.5f, shoePaint)
 
-                    // Left leg (back)
-                    limbPaint.color = Color.parseColor("#0284C7")
-                    canvas.drawLine(cx - 2f, hipY, cx - 8f, hipY + 7f, limbPaint)
-                    canvas.drawLine(cx - 8f, hipY + 7f, cx - 14f, hipY + 14f, limbPaint)
-                    canvas.drawCircle(cx - 14f, hipY + 14f, 3f, shoePaint)
+                    // Left leg kicks back in powerful drive
+                    canvas.drawLine(headCx - 2f, waistY, headCx - 9f, waistY + 7f, legPaint)
+                    canvas.drawLine(headCx - 9f, waistY + 7f, headCx - 17f, waistY + 15f, legPaint)
+                    canvas.drawLine(headCx - 9f, waistY + 7f, headCx - 17f, waistY + 15f, legStripePaint)
+                    canvas.drawCircle(headCx - 17f, waistY + 15f, 3.5f, shoePaint)
 
-                    // Arms: Left arm forward, Right arm back
-                    limbPaint.color = Color.parseColor("#FDBA74")
-                    canvas.drawLine(cx + 4f, chestTopY + 2f, cx - 2f, chestTopY + 8f, limbPaint)
-                    canvas.drawLine(cx - 2f, chestTopY + 8f, cx - 8f, chestTopY + 6f, limbPaint)
+                    // Arms: Left arm bent forward, Right arm swinging back
+                    canvas.drawLine(headCx + 6f, chestY + 2f, headCx - 2f, chestY + 8f, armPaint)
+                    canvas.drawLine(headCx - 2f, chestY + 8f, headCx - 9f, chestY + 5f, armPaint)
 
-                    canvas.drawLine(cx - 4f, chestTopY + 2f, cx + 5f, chestTopY + 7f, limbPaint)
-                    canvas.drawLine(cx + 5f, chestTopY + 7f, cx + 12f, chestTopY + 5f, limbPaint)
+                    canvas.drawLine(headCx - 5f, chestY + 2f, headCx + 6f, chestY + 7f, armPaint)
+                    canvas.drawLine(headCx + 6f, chestY + 7f, headCx + 14f, chestY + 4f, armPaint)
                 }
                 1, 3 -> {
-                    // Mid-stride passing phase (knees bent, compact)
-                    limbPaint.color = Color.parseColor("#38BDF8")
-                    canvas.drawLine(cx + 2f, hipY, cx + 5f, hipY + 7f, limbPaint)
-                    canvas.drawLine(cx + 5f, hipY + 7f, cx + 6f, hipY + 15f, limbPaint)
-                    canvas.drawCircle(cx + 6f, hipY + 15f, 3f, shoePaint)
+                    // Mid-stride flight phase: knees bent, compact, aerodynamic
+                    canvas.drawLine(headCx + 3f, waistY, headCx + 6f, waistY + 8f, legPaint)
+                    canvas.drawLine(headCx + 6f, waistY + 8f, headCx + 7f, waistY + 16f, legPaint)
+                    canvas.drawCircle(headCx + 7f, waistY + 16f, 3.5f, shoePaint)
 
-                    limbPaint.color = Color.parseColor("#0284C7")
-                    canvas.drawLine(cx - 2f, hipY, cx - 5f, hipY + 7f, limbPaint)
-                    canvas.drawLine(cx - 5f, hipY + 7f, cx - 6f, hipY + 15f, limbPaint)
-                    canvas.drawCircle(cx - 6f, hipY + 15f, 3f, shoePaint)
+                    canvas.drawLine(headCx - 3f, waistY, headCx - 6f, waistY + 8f, legPaint)
+                    canvas.drawLine(headCx - 6f, waistY + 8f, headCx - 6f, waistY + 16f, legPaint)
+                    canvas.drawCircle(headCx - 6f, waistY + 16f, 3.5f, shoePaint)
 
-                    limbPaint.color = Color.parseColor("#FDBA74")
-                    canvas.drawLine(cx + 4f, chestTopY + 2f, cx + 6f, chestTopY + 9f, limbPaint)
-                    canvas.drawLine(cx - 4f, chestTopY + 2f, cx - 6f, chestTopY + 9f, limbPaint)
+                    // Arms tucked close to chest
+                    canvas.drawLine(headCx + 5f, chestY + 2f, headCx + 7f, chestY + 10f, armPaint)
+                    canvas.drawLine(headCx - 5f, chestY + 2f, headCx - 7f, chestY + 10f, armPaint)
                 }
                 2 -> {
-                    // Left leg forward, right leg back
-                    limbPaint.color = Color.parseColor("#38BDF8")
-                    // Left leg (front)
-                    canvas.drawLine(cx - 2f, hipY, cx + 8f, hipY + 8f, limbPaint)
-                    canvas.drawLine(cx + 8f, hipY + 8f, cx + 14f, hipY + 16f, limbPaint)
-                    canvas.drawCircle(cx + 14f, hipY + 16f, 3f, shoePaint)
+                    // Left leg drives forward with high knee
+                    canvas.drawLine(headCx - 2f, waistY, headCx + 10f, waistY + 8f, legPaint)
+                    canvas.drawLine(headCx + 10f, waistY + 8f, headCx + 16f, waistY + 17f, legPaint)
+                    canvas.drawLine(headCx + 10f, waistY + 8f, headCx + 16f, waistY + 17f, legStripePaint)
+                    canvas.drawCircle(headCx + 16f, waistY + 17f, 3.5f, shoePaint)
 
-                    // Right leg (back)
-                    limbPaint.color = Color.parseColor("#0284C7")
-                    canvas.drawLine(cx + 2f, hipY, cx - 8f, hipY + 7f, limbPaint)
-                    canvas.drawLine(cx - 8f, hipY + 7f, cx - 14f, hipY + 14f, limbPaint)
-                    canvas.drawCircle(cx - 14f, hipY + 14f, 3f, shoePaint)
+                    // Right leg kicks back
+                    canvas.drawLine(headCx + 2f, waistY, headCx - 9f, waistY + 7f, legPaint)
+                    canvas.drawLine(headCx - 9f, waistY + 7f, headCx - 17f, waistY + 15f, legPaint)
+                    canvas.drawLine(headCx - 9f, waistY + 7f, headCx - 17f, waistY + 15f, legStripePaint)
+                    canvas.drawCircle(headCx - 17f, waistY + 15f, 3.5f, shoePaint)
 
                     // Arms opposite
-                    limbPaint.color = Color.parseColor("#FDBA74")
-                    canvas.drawLine(cx - 4f, chestTopY + 2f, cx + 5f, chestTopY + 7f, limbPaint)
-                    canvas.drawLine(cx + 5f, chestTopY + 7f, cx + 12f, chestTopY + 5f, limbPaint)
+                    canvas.drawLine(headCx - 5f, chestY + 2f, headCx + 6f, chestY + 7f, armPaint)
+                    canvas.drawLine(headCx + 6f, chestY + 7f, headCx + 14f, chestY + 4f, armPaint)
 
-                    canvas.drawLine(cx + 4f, chestTopY + 2f, cx - 2f, chestTopY + 8f, limbPaint)
-                    canvas.drawLine(cx - 2f, chestTopY + 8f, cx - 8f, chestTopY + 6f, limbPaint)
+                    canvas.drawLine(headCx + 6f, chestY + 2f, headCx - 2f, chestY + 8f, armPaint)
+                    canvas.drawLine(headCx - 2f, chestY + 8f, headCx - 9f, chestY + 5f, armPaint)
                 }
             }
         } else {
-            // Idle stance (relaxed)
-            limbPaint.color = Color.parseColor("#38BDF8")
-            canvas.drawLine(cx - 3f, hipY, cx - 5f, hipY + 16f, limbPaint)
-            canvas.drawCircle(cx - 5f, hipY + 16f, 3f, shoePaint)
+            // Standing athletic idle stance
+            canvas.drawLine(headCx - 4f, waistY, headCx - 6f, waistY + 18f, legPaint)
+            canvas.drawCircle(headCx - 6f, waistY + 18f, 3.5f, shoePaint)
 
-            canvas.drawLine(cx + 3f, hipY, cx + 5f, hipY + 16f, limbPaint)
-            canvas.drawCircle(cx + 5f, hipY + 16f, 3f, shoePaint)
+            canvas.drawLine(headCx + 4f, waistY, headCx + 6f, waistY + 18f, legPaint)
+            canvas.drawCircle(headCx + 6f, waistY + 18f, 3.5f, shoePaint)
 
-            limbPaint.color = Color.parseColor("#FDBA74")
-            canvas.drawLine(cx - 5f, chestTopY + 2f, cx - 8f, chestTopY + 12f, limbPaint)
-            canvas.drawLine(cx + 5f, chestTopY + 2f, cx + 8f, chestTopY + 12f, limbPaint)
+            canvas.drawLine(headCx - 6f, chestY + 2f, headCx - 9f, chestY + 13f, armPaint)
+            canvas.drawLine(headCx + 6f, chestY + 2f, headCx + 9f, chestY + 13f, armPaint)
         }
 
-        // 4. Runner High-Contrast Badge ("🏃 BẠN")
-        val badgeW = 76f
-        val badgeH = 24f
-        val badgeY = 94f
+        // 6. Modern Glassmorphism Runner Badge ("🏃 BẠN (LIVE)")
+        val badgeW = 90f
+        val badgeH = 26f
+        val badgeY = 106f
         val pillRect = RectF(cx - badgeW / 2f, badgeY, cx + badgeW / 2f, badgeY + badgeH)
 
         val badgeBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#E60F172A")
+            color = Color.parseColor("#F00B132B")
             style = Paint.Style.FILL
         }
         canvas.drawRoundRect(pillRect, 8f, 8f, badgeBgPaint)
 
         val badgeBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#06B6D4")
+            color = Color.parseColor("#00F0FF")
             style = Paint.Style.STROKE
             strokeWidth = 2.5f
         }
         canvas.drawRoundRect(pillRect, 8f, 8f, badgeBorderPaint)
 
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#22D3EE")
+            color = Color.parseColor("#00F0FF")
             textSize = 15f
             isFakeBoldText = true
             textAlign = Paint.Align.CENTER
         }
-        canvas.drawText("🏃 BẠN", cx, badgeY + 17f, textPaint)
+        canvas.drawText("🏃 BẠN (LIVE)", cx, badgeY + 18f, textPaint)
 
         return BitmapDrawable(context.resources, bitmap)
     }
 
     /**
-     * Creates an animated frame for a Zombie character (Leader Alpha, Flanker 1, or Flanker 2).
+     * Generates a terrifying high-definition animated frame for a Zombie character.
      *
-     * @param frame Current animation step [0..3].
-     * @param distMeters Rounded distance to runner.
-     * @param alertLevel Severity level (Safe, Warning, Danger, Caught).
-     * @param zombieType 0 = Alpha Leader (Red), 1 = Stalker Flank (Orange), 2 = Mutant (Purple/Crimson).
+     * @param zombieType 0 = Alpha Leader (Crimson), 1 = Stalker (Toxic Orange), 2 = Mutant (Neon Purple).
      */
     fun createZombieFrameDrawable(
         context: Context,
@@ -249,190 +308,267 @@ object MarkerAnimationFactory {
         alertLevel: ZombieAlertLevel,
         zombieType: Int
     ): BitmapDrawable {
-        val w = 110
-        val h = 130
+        val w = 130
+        val h = 156
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
         val cx = w / 2f
-        val cy = 48f
+        val cy = 54f
 
-        // Theme colors based on zombie type and alert level
-        val primaryColor = when (zombieType) {
-            0 -> if (alertLevel == ZombieAlertLevel.DANGER || alertLevel == ZombieAlertLevel.CAUGHT) Color.parseColor("#EF4444") else Color.parseColor("#DC2626")
-            1 -> Color.parseColor("#F97316") // Orange stalker
-            else -> Color.parseColor("#A855F7") // Purple toxic mutant
+        val (primaryColor, darkBgColor, nameTitle) = when (zombieType) {
+            0 -> Triple(Color.parseColor("#EF4444"), Color.parseColor("#1C0606"), "ALPHA")
+            1 -> Triple(Color.parseColor("#F97316"), Color.parseColor("#1C0C04"), "STALKER")
+            else -> Triple(Color.parseColor("#A855F7"), Color.parseColor("#14061F"), "MUTANT")
         }
 
-        // 1. Ominous Expanding Fear Ring
-        val auraRadius = 34f + (frame * 3.5f)
-        val auraPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = primaryColor
-            alpha = (90 - frame * 18).coerceIn(20, 100)
-            style = Paint.Style.STROKE
-            strokeWidth = 3.5f
-        }
-        canvas.drawCircle(cx, cy, auraRadius, auraPaint)
-
-        // Dark bloody platform
-        val platformPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#1C0A0A")
+        // 1. Ominous Ground Shadow with Toxic Pool
+        val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#66000000")
             style = Paint.Style.FILL
         }
-        canvas.drawCircle(cx, cy, 32f, platformPaint)
+        canvas.drawOval(cx - 24f, cy + 34f, cx + 24f, cy + 42f, shadowPaint)
 
-        val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        // 2. Violent Terror Shockwave Rings
+        val waveRadius = 36f + (frame * 4f)
+        val wavePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = primaryColor
+            alpha = (140 - frame * 30).coerceIn(20, 140)
+            style = Paint.Style.STROKE
+            strokeWidth = 3.5f
+        }
+        canvas.drawCircle(cx, cy, waveRadius, wavePaint)
+
+        // 3. Volcanic Cracked Stone Base Disc
+        val discRadius = 33f
+        val discPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = RadialGradient(
+                cx, cy, discRadius,
+                intArrayOf(darkBgColor, Color.parseColor("#090202")),
+                floatArrayOf(0.4f, 1.0f),
+                Shader.TileMode.CLAMP
+            )
+            style = Paint.Style.FILL
+        }
+        canvas.drawCircle(cx, cy, discRadius, discPaint)
+
+        val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = primaryColor
             style = Paint.Style.STROKE
             strokeWidth = 3.5f
         }
-        canvas.drawCircle(cx, cy, 32f, ringPaint)
+        canvas.drawCircle(cx, cy, discRadius, rimPaint)
 
-        // 2. Animated Decayed Zombie Character
-        // Shambling lunge & bob
+        // Jagged Volcanic Cracks on Disc
+        val crackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = primaryColor
+            strokeWidth = 1.8f
+            style = Paint.Style.STROKE
+            alpha = 180
+        }
+        canvas.drawLine(cx - 14f, cy - 10f, cx - 4f, cy + 2f, crackPaint)
+        canvas.drawLine(cx - 4f, cy + 2f, cx - 18f, cy + 18f, crackPaint)
+        canvas.drawLine(cx + 8f, cy - 16f, cx + 16f, cy - 4f, crackPaint)
+        canvas.drawLine(cx + 16f, cy - 4f, cx + 10f, cy + 14f, crackPaint)
+
+        // 4. Violent Blood Slash Streak (Frame 1 lunge effect)
+        if (frame == 1) {
+            val slashPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = primaryColor
+                strokeWidth = 3.5f
+                strokeCap = Paint.Cap.ROUND
+                style = Paint.Style.STROKE
+            }
+            val slashPath = Path().apply {
+                moveTo(cx + 12f, cy - 18f)
+                quadTo(cx + 26f, cy - 2f, cx + 18f, cy + 16f)
+            }
+            canvas.drawPath(slashPath, slashPaint)
+        }
+
+        // 5. Terrifying Apocalyptic Zombie Character
         val lungeX = when (frame) {
-            1, 3 -> 4f // forward lunge towards runner
+            1 -> 6f  // violent forward thrust
+            3 -> 3f  // aggressive dual-reach
             else -> -1f
         }
         val bobY = when (frame) {
-            0 -> -2f
+            0 -> -3f
             1 -> 2f
             2 -> -1f
             3 -> 3f
             else -> 0f
         }
 
-        val skinPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        val zx = cx + lungeX
+        val zy = cy - 14f + bobY
+
+        // Rotting Skull & Jaw
+        val skullPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = when (zombieType) {
-                2 -> Color.parseColor("#7E22CE") // purple mutant skin
-                else -> Color.parseColor("#65A30D") // toxic rotting green skin
+                2 -> Color.parseColor("#7E22CE") // purple mutant
+                else -> Color.parseColor("#4D7C0F") // toxic green rot
             }
             style = Paint.Style.FILL
         }
-        val raggedClothesPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#450A0A") // blood-stained rags
+        canvas.drawCircle(zx, zy, 8.5f, skullPaint)
+
+        // Sunken dark eye sockets
+        val socketPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#170202")
             style = Paint.Style.FILL
         }
-        val clawPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            strokeWidth = 4f
+        canvas.drawCircle(zx + 3f, zy - 1.5f, 3.2f, socketPaint)
+        canvas.drawCircle(zx - 4f, zy - 1.5f, 3.2f, socketPaint)
+
+        // Flaring Crimson Slit Eyes with glowing trail
+        val eyePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#FF0055")
+            style = Paint.Style.FILL
+        }
+        val flareR = if (frame == 1 || frame == 3) 2.5f else 1.8f
+        canvas.drawCircle(zx + 3f, zy - 1.5f, flareR, eyePaint)
+        canvas.drawCircle(zx - 4f, zy - 1.5f, flareR, eyePaint)
+
+        // Eye flare streak on lunge
+        if (frame == 1) {
+            val flarePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.parseColor("#FF0055")
+                strokeWidth = 2.5f
+                strokeCap = Paint.Cap.ROUND
+            }
+            canvas.drawLine(zx + 3f, zy - 1.5f, zx + 12f, zy - 3.5f, flarePaint)
+        }
+
+        // Gaping bloody jaw with sharp fangs
+        val mouthPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#7F1D1D")
+            style = Paint.Style.FILL
+        }
+        canvas.drawRect(zx - 4f, zy + 3.5f, zx + 4f, zy + 7.5f, mouthPaint)
+
+        // Sharp white fangs
+        val fangPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            strokeWidth = 1.5f
+        }
+        canvas.drawLine(zx - 2.5f, zy + 3.5f, zx - 2.5f, zy + 6f, fangPaint)
+        canvas.drawLine(zx + 2.5f, zy + 3.5f, zx + 2.5f, zy + 6f, fangPaint)
+
+        // Hunched Torso in shredded apocalyptic rags
+        val chestY = zy + 8f
+        val waistY = chestY + 16f
+        val torsoPath = Path().apply {
+            moveTo(zx - 8f, chestY)
+            lineTo(zx + 8f, chestY)
+            lineTo(zx + 6f, waistY)
+            lineTo(zx - 6f, waistY)
+            close()
+        }
+        val ragsPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#370A0A")
+            style = Paint.Style.FILL
+        }
+        canvas.drawPath(torsoPath, ragsPaint)
+
+        // Spined hunched back spikes
+        val spikePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#1C1917")
+            strokeWidth = 2.5f
             strokeCap = Paint.Cap.ROUND
-            color = Color.parseColor("#4D7C0F")
+        }
+        canvas.drawLine(zx - 7f, chestY + 3f, zx - 13f, chestY - 1f, spikePaint)
+        canvas.drawLine(zx - 6f, chestY + 9f, zx - 12f, chestY + 6f, spikePaint)
+
+        // Massive Skeletal Claws & Shambling Legs
+        val armPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            strokeWidth = 6f
+            strokeCap = Paint.Cap.ROUND
+            color = when (zombieType) {
+                2 -> Color.parseColor("#6B21A8")
+                else -> Color.parseColor("#3F6212")
+            }
             style = Paint.Style.STROKE
         }
         val clawTipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#171717") // sharp black claws
+            color = Color.parseColor("#171717")
             style = Paint.Style.FILL
         }
-        val eyePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#FF1744") // bright glowing red eyes
+        val bloodTipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#DC2626")
             style = Paint.Style.FILL
         }
-
-        // Head (leaning forward)
-        val headX = cx + lungeX
-        val headY = cy - 12f + bobY
-        canvas.drawCircle(headX, headY, 7.5f, skinPaint)
-
-        // Rotten Hair Tufts
-        val hairTuftPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#1E293B")
-            strokeWidth = 2f
+        val legPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            strokeWidth = 5.5f
+            strokeCap = Paint.Cap.ROUND
+            color = Color.parseColor("#292524")
             style = Paint.Style.STROKE
         }
-        canvas.drawLine(headX - 4f, headY - 7f, headX - 6f, headY - 12f, hairTuftPaint)
-        canvas.drawLine(headX + 2f, headY - 7f, headX + 4f, headY - 13f, hairTuftPaint)
 
-        // Evil Glowing Red Eyes (flares brightly on lunges)
-        val eyeRadius = if (frame == 1 || frame == 3) 2.6f else 1.8f
-        canvas.drawCircle(headX + 2.5f, headY - 1.5f, eyeRadius, eyePaint)
-        canvas.drawCircle(headX - 3.5f, headY - 1.5f, eyeRadius, eyePaint)
-
-        // Gaping Rotting Jaw / Teeth
-        val jawPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#991B1B") // bloody mouth interior
-            style = Paint.Style.FILL
-        }
-        canvas.drawRect(headX - 3f, headY + 3f, headX + 3f, headY + 6f, jawPaint)
-
-        // Torso in shredded rags
-        val chestTopY = headY + 7f
-        val hipY = chestTopY + 13f
-        val torsoPath = Path().apply {
-            moveTo(headX - 6f, chestTopY)
-            lineTo(headX + 7f, chestTopY)
-            lineTo(headX + 5f, hipY)
-            lineTo(headX - 5f, hipY)
-            close()
-        }
-        canvas.drawPath(torsoPath, raggedClothesPaint)
-
-        // Animated Lunging Skeletal Claws & Shambling Legs
         when (frame) {
             0 -> {
-                // Right arm reaching forward with sharp claws
-                canvas.drawLine(headX + 5f, chestTopY + 3f, headX + 13f, chestTopY + 5f, clawPaint)
-                canvas.drawLine(headX + 13f, chestTopY + 5f, headX + 18f, chestTopY + 10f, clawPaint)
-                canvas.drawCircle(headX + 18f, chestTopY + 10f, 2.5f, clawTipPaint)
+                // Giant right claw cocked back, ready to strike
+                canvas.drawLine(zx + 6f, chestY + 2f, zx + 14f, chestY + 4f, armPaint)
+                canvas.drawLine(zx + 14f, chestY + 4f, zx + 20f, chestY + 11f, armPaint)
+                canvas.drawCircle(zx + 20f, chestY + 11f, 3.5f, clawTipPaint)
+                canvas.drawCircle(zx + 22f, chestY + 12f, 2f, bloodTipPaint)
 
-                // Left arm hunched
-                canvas.drawLine(headX - 5f, chestTopY + 3f, headX - 8f, chestTopY + 9f, clawPaint)
+                canvas.drawLine(zx - 6f, chestY + 2f, zx - 10f, chestY + 10f, armPaint)
 
-                // Dragging leg
-                clawPaint.color = Color.parseColor("#3F6212")
-                canvas.drawLine(headX + 2f, hipY, headX + 6f, hipY + 14f, clawPaint)
-                canvas.drawLine(headX - 3f, hipY, headX - 9f, hipY + 13f, clawPaint)
+                // Dragging shambling leg
+                canvas.drawLine(zx + 3f, waistY, zx + 8f, waistY + 17f, legPaint)
+                canvas.drawLine(zx - 3f, waistY, zx - 11f, waistY + 15f, legPaint)
             }
             1 -> {
-                // DOUBLE CLAW SWIPE FORWARD (Fierce attack)
-                canvas.drawLine(headX + 5f, chestTopY + 3f, headX + 16f, chestTopY + 2f, clawPaint)
-                canvas.drawLine(headX + 16f, chestTopY + 2f, headX + 22f, chestTopY + 8f, clawPaint)
-                canvas.drawCircle(headX + 22f, chestTopY + 8f, 3f, clawTipPaint)
+                // DUAL CLAW VICIOUS SWIPE DOWNWARD!
+                canvas.drawLine(zx + 6f, chestY + 2f, zx + 18f, chestY + 1f, armPaint)
+                canvas.drawLine(zx + 18f, chestY + 1f, zx + 25f, chestY + 9f, armPaint)
+                canvas.drawCircle(zx + 25f, chestY + 9f, 4f, clawTipPaint)
+                canvas.drawCircle(zx + 27f, chestY + 11f, 2.5f, bloodTipPaint)
 
-                canvas.drawLine(headX - 4f, chestTopY + 3f, headX + 10f, chestTopY + 6f, clawPaint)
-                canvas.drawLine(headX + 10f, chestTopY + 6f, headX + 18f, chestTopY + 12f, clawPaint)
-                canvas.drawCircle(headX + 18f, chestTopY + 12f, 3f, clawTipPaint)
+                canvas.drawLine(zx - 5f, chestY + 2f, zx + 12f, chestY + 6f, armPaint)
+                canvas.drawLine(zx + 12f, chestY + 6f, zx + 20f, chestY + 15f, armPaint)
+                canvas.drawCircle(zx + 20f, chestY + 15f, 3.5f, clawTipPaint)
 
-                // Stomping legs
-                clawPaint.color = Color.parseColor("#3F6212")
-                canvas.drawLine(headX + 3f, hipY, headX + 9f, hipY + 15f, clawPaint)
-                canvas.drawLine(headX - 2f, hipY, headX - 4f, hipY + 14f, clawPaint)
+                // Heavy stomping stride
+                canvas.drawLine(zx + 4f, waistY, zx + 11f, waistY + 17f, legPaint)
+                canvas.drawLine(zx - 2f, waistY, zx - 4f, waistY + 16f, legPaint)
             }
             2 -> {
-                // Left arm reaching forward, Right arm back
-                canvas.drawLine(headX - 5f, chestTopY + 3f, headX + 13f, chestTopY + 5f, clawPaint)
-                canvas.drawLine(headX + 13f, chestTopY + 5f, headX + 18f, chestTopY + 10f, clawPaint)
-                canvas.drawCircle(headX + 18f, chestTopY + 10f, 2.5f, clawTipPaint)
+                // Left claw slashing forward, Right claw pulling back
+                canvas.drawLine(zx - 6f, chestY + 2f, zx + 14f, chestY + 4f, armPaint)
+                canvas.drawLine(zx + 14f, chestY + 4f, zx + 20f, chestY + 11f, armPaint)
+                canvas.drawCircle(zx + 20f, chestY + 11f, 3.5f, clawTipPaint)
 
-                canvas.drawLine(headX + 5f, chestTopY + 3f, headX + 8f, chestTopY + 9f, clawPaint)
+                canvas.drawLine(zx + 6f, chestY + 2f, zx + 9f, chestY + 11f, armPaint)
 
-                clawPaint.color = Color.parseColor("#3F6212")
-                canvas.drawLine(headX - 2f, hipY, headX + 7f, hipY + 14f, clawPaint)
-                canvas.drawLine(headX + 3f, hipY, headX - 8f, hipY + 13f, clawPaint)
+                canvas.drawLine(zx - 3f, waistY, zx + 8f, waistY + 17f, legPaint)
+                canvas.drawLine(zx + 3f, waistY, zx - 10f, waistY + 15f, legPaint)
             }
             3 -> {
-                // JAW SNAP & DUAL CLAW GRASP
-                canvas.drawLine(headX + 5f, chestTopY + 3f, headX + 18f, chestTopY + 4f, clawPaint)
-                canvas.drawLine(headX + 18f, chestTopY + 4f, headX + 23f, chestTopY + 11f, clawPaint)
-                canvas.drawCircle(headX + 23f, chestTopY + 11f, 3f, clawTipPaint)
+                // FEROCIOUS DUAL CLAW GRASP REACHING FORWARD!
+                canvas.drawLine(zx + 6f, chestY + 2f, zx + 19f, chestY + 3f, armPaint)
+                canvas.drawLine(zx + 19f, chestY + 3f, zx + 26f, chestY + 12f, armPaint)
+                canvas.drawCircle(zx + 26f, chestY + 12f, 4f, clawTipPaint)
+                canvas.drawCircle(zx + 28f, chestY + 14f, 2.5f, bloodTipPaint)
 
-                canvas.drawLine(headX - 5f, chestTopY + 3f, headX + 12f, chestTopY + 8f, clawPaint)
-                canvas.drawLine(headX + 12f, chestTopY + 8f, headX + 19f, chestTopY + 14f, clawPaint)
-                canvas.drawCircle(headX + 19f, chestTopY + 14f, 3f, clawTipPaint)
+                canvas.drawLine(zx - 6f, chestY + 2f, zx + 14f, chestY + 8f, armPaint)
+                canvas.drawLine(zx + 14f, chestY + 8f, zx + 22f, chestY + 16f, armPaint)
+                canvas.drawCircle(zx + 22f, chestY + 16f, 3.5f, clawTipPaint)
 
-                clawPaint.color = Color.parseColor("#3F6212")
-                canvas.drawLine(headX + 3f, hipY, headX + 8f, hipY + 14f, clawPaint)
-                canvas.drawLine(headX - 3f, hipY, headX - 6f, hipY + 15f, clawPaint)
+                canvas.drawLine(zx + 3f, waistY, zx + 9f, waistY + 17f, legPaint)
+                canvas.drawLine(zx - 3f, waistY, zx - 6f, waistY + 16f, legPaint)
             }
         }
 
-        // 3. High-Contrast Distance Badge ("🧟 65m")
-        val badgeW = 76f
-        val badgeH = 24f
-        val badgeY = 94f
+        // 6. Modern Glassmorphism Terror Badge ("👑 ALPHA 65m")
+        val badgeW = 96f
+        val badgeH = 26f
+        val badgeY = 106f
         val pillRect = RectF(cx - badgeW / 2f, badgeY, cx + badgeW / 2f, badgeY + badgeH)
 
         val badgeBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#E6180505")
+            color = Color.parseColor("#F0180404")
             style = Paint.Style.FILL
         }
         canvas.drawRoundRect(pillRect, 8f, 8f, badgeBgPaint)
@@ -446,16 +582,16 @@ object MarkerAnimationFactory {
 
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = primaryColor
-            textSize = 15f
+            textSize = 14f
             isFakeBoldText = true
             textAlign = Paint.Align.CENTER
         }
-        val labelPrefix = when (zombieType) {
-            0 -> "🧟"
-            1 -> "💀"
+        val prefix = when (zombieType) {
+            0 -> "👑"
+            1 -> "⚡"
             else -> "☣️"
         }
-        canvas.drawText("$labelPrefix ${distMeters}m", cx, badgeY + 17f, textPaint)
+        canvas.drawText("$prefix $nameTitle ${distMeters}m", cx, badgeY + 18f, textPaint)
 
         return BitmapDrawable(context.resources, bitmap)
     }

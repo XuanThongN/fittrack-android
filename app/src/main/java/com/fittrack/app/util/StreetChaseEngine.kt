@@ -1,6 +1,11 @@
 package com.fittrack.app.util
 
 import android.location.Location
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 import kotlin.math.abs
 import kotlin.math.asin
 import kotlin.math.atan2
@@ -13,26 +18,23 @@ data class ChasePoint(
 )
 
 /**
- * High-precision Real Street Chase Engine.
+ * High-precision Real Street Route Zombie Navigation Engine.
  *
- * Guarantees that zombies chase the runner strictly along the real-world road/street polyline
- * that the runner traversed, naturally turning at every intersection and corner without cutting
- * through buildings or terrain.
+ * Integrates live OpenStreetMap street geometry (via OSRM) with user GPS tracks,
+ * ensuring zombies spawn directly on the real street and follow every actual road curve,
+ * intersection, and turn without ever cutting through houses or buildings.
  */
 object StreetChaseEngine {
 
-    /**
-     * Calculates precise distance between two GPS coordinates in meters using Android Location API.
-     */
+    private var cachedStreetPrefix: List<Pair<Double, Double>> = emptyList()
+    private var lastSnappedCoord: Pair<Double, Double>? = null
+
     fun calculateDistanceMeters(p1: Pair<Double, Double>, p2: Pair<Double, Double>): Double {
         val results = FloatArray(1)
         Location.distanceBetween(p1.first, p1.second, p2.first, p2.second, results)
         return results[0].toDouble()
     }
 
-    /**
-     * Calculates the forward bearing (in degrees [0..360)) from point 1 to point 2.
-     */
     fun calculateBearing(p1: Pair<Double, Double>, p2: Pair<Double, Double>): Float {
         val lat1 = Math.toRadians(p1.first)
         val lon1 = Math.toRadians(p1.second)
@@ -45,9 +47,6 @@ object StreetChaseEngine {
         return (brng + 360f) % 360f
     }
 
-    /**
-     * Projects a coordinate forward along a given bearing by a specified distance in meters (WGS-84).
-     */
     fun projectPoint(origin: Pair<Double, Double>, bearingDeg: Float, distanceMeters: Double): Pair<Double, Double> {
         if (distanceMeters <= 0.0001) return origin
         val earthRadius = 6371000.0 // meters
@@ -68,24 +67,124 @@ object StreetChaseEngine {
     }
 
     /**
-     * Finds the exact location and street bearing along the runner's route history backwards from current position.
-     *
-     * @param pathPoints Historical GPS coordinates recorded along the runner's real street route.
-     * @param currentLocation The runner's current live GPS coordinate.
-     * @param currentBearing The runner's current movement heading.
-     * @param distanceBackMeters The chase distance in meters behind the runner.
-     * @param lateralOffsetMeters Optional offset perpendicular to the road (e.g. +1.8m right side of street, -1.8m left side).
+     * Fetches real OpenStreetMap street nodes behind the user via OSRM public routing API.
+     * Snaps the user to the nearest road and retrieves coordinates along the actual street network.
+     */
+    suspend fun fetchRealStreetPathBehind(
+        lat: Double,
+        lng: Double,
+        bearingDeg: Float,
+        distanceMeters: Double = 120.0
+    ): List<Pair<Double, Double>> = withContext(Dispatchers.IO) {
+        try {
+            val last = lastSnappedCoord
+            if (last != null && cachedStreetPrefix.isNotEmpty()) {
+                val shift = calculateDistanceMeters(last, Pair(lat, lng))
+                if (shift < 25.0) {
+                    return@withContext cachedStreetPrefix
+                }
+            }
+
+            // 1. Snap to nearest street on OpenStreetMap
+            val snapUrl = "https://router.project-osrm.org/nearest/v1/walking/$lng,$lat?number=3"
+            val conn = (URL(snapUrl).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 3500
+                readTimeout = 3500
+                setRequestProperty("User-Agent", "FitTrackApp/1.4 (Android)")
+            }
+            if (conn.responseCode != 200) return@withContext emptyList()
+
+            val snapJson = conn.inputStream.bufferedReader().use { it.readText() }
+            val snapObj = JSONObject(snapJson)
+            val wps = snapObj.optJSONArray("waypoints") ?: return@withContext emptyList()
+            if (wps.length() < 1) return@withContext emptyList()
+
+            val p0Loc = wps.getJSONObject(0).getJSONArray("location")
+            val snappedLng = p0Loc.getDouble(0)
+            val snappedLat = p0Loc.getDouble(1)
+
+            // 2. Determine street orientation along OpenStreetMap way
+            var roadBearing = bearingDeg
+            if (wps.length() >= 2 && (roadBearing == 0f || roadBearing.isNaN())) {
+                val p1Loc = wps.getJSONObject(1).getJSONArray("location")
+                val p1Lng = p1Loc.getDouble(0)
+                val p1Lat = p1Loc.getDouble(1)
+                roadBearing = calculateBearing(Pair(p1Lat, p1Lng), Pair(snappedLat, snappedLng))
+            }
+            if (roadBearing == 0f || roadBearing.isNaN()) {
+                roadBearing = 180f
+            }
+
+            // 3. Project spawn point behind runner along the road
+            val backBearing = (roadBearing + 180f) % 360f
+            val spawnTarget = projectPoint(Pair(snappedLat, snappedLng), backBearing, distanceMeters * 1.3)
+
+            // 4. Fetch walking route along actual street network from spawnTarget to user road position
+            val routeUrl = "https://router.project-osrm.org/route/v1/walking/${spawnTarget.second},${spawnTarget.first};$snappedLng,$snappedLat?overview=full&geometries=geojson"
+            val routeConn = (URL(routeUrl).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 3500
+                readTimeout = 3500
+                setRequestProperty("User-Agent", "FitTrackApp/1.4 (Android)")
+            }
+            if (routeConn.responseCode != 200) return@withContext listOf(Pair(snappedLat, snappedLng))
+
+            val routeJson = routeConn.inputStream.bufferedReader().use { it.readText() }
+            val routeObj = JSONObject(routeJson)
+            val routes = routeObj.optJSONArray("routes") ?: return@withContext listOf(Pair(snappedLat, snappedLng))
+            if (routes.length() < 1) return@withContext listOf(Pair(snappedLat, snappedLng))
+
+            val coords = routes.getJSONObject(0).getJSONObject("geometry").getJSONArray("coordinates")
+            val streetNodes = mutableListOf<Pair<Double, Double>>()
+            for (i in 0 until coords.length()) {
+                val pt = coords.getJSONArray(i)
+                streetNodes.add(Pair(pt.getDouble(1), pt.getDouble(0)))
+            }
+
+            if (streetNodes.isNotEmpty()) {
+                cachedStreetPrefix = streetNodes
+                lastSnappedCoord = Pair(snappedLat, snappedLng)
+                streetNodes
+            } else {
+                emptyList()
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /**
+     * Finds the exact location and street bearing along the combined real street road network
+     * (pre-fetched OSM street nodes + runner's GPS polyline) backwards from current location.
      */
     fun getPointAlongPathBackwards(
+        streetPrefix: List<Pair<Double, Double>>,
         pathPoints: List<Pair<Double, Double>>,
         currentLocation: Pair<Double, Double>?,
         currentBearing: Float,
         distanceBackMeters: Double,
         lateralOffsetMeters: Double = 0.0
     ): ChasePoint {
-        // 1. Build the active road polyline ending at the runner's current location
         val fullPath = mutableListOf<Pair<Double, Double>>()
-        fullPath.addAll(pathPoints)
+
+        if (streetPrefix.isNotEmpty()) {
+            fullPath.addAll(streetPrefix)
+        }
+
+        if (pathPoints.isNotEmpty()) {
+            if (fullPath.isNotEmpty()) {
+                val lastPrefix = fullPath.last()
+                val firstPath = pathPoints.first()
+                if (calculateDistanceMeters(lastPrefix, firstPath) < 60.0) {
+                    fullPath.addAll(pathPoints)
+                } else {
+                    fullPath.clear()
+                    fullPath.addAll(pathPoints)
+                }
+            } else {
+                fullPath.addAll(pathPoints)
+            }
+        }
+
         if (currentLocation != null && (fullPath.isEmpty() || fullPath.last() != currentLocation)) {
             fullPath.add(currentLocation)
         }
@@ -96,7 +195,6 @@ object StreetChaseEngine {
         }
 
         if (fullPath.size == 1) {
-            // Runner hasn't moved yet: zombie is behind along reverse of runner's bearing
             val backBearing = (currentBearing + 180f) % 360f
             val basePos = projectPoint(fullPath.first(), backBearing, distanceBackMeters)
             val finalPos = if (lateralOffsetMeters != 0.0) {
@@ -106,14 +204,13 @@ object StreetChaseEngine {
             return ChasePoint(finalPos, currentBearing)
         }
 
-        // 2. Step backwards along the exact road segments that the runner ran
         var remaining = distanceBackMeters
         var targetPos: Pair<Double, Double>? = null
         var segmentBearing = currentBearing
 
         for (i in fullPath.size - 1 downTo 1) {
-            val pEnd = fullPath[i]       // closer to runner
-            val pStart = fullPath[i - 1] // further back along road
+            val pEnd = fullPath[i]
+            val pStart = fullPath[i - 1]
             val segLen = calculateDistanceMeters(pStart, pEnd)
 
             if (segLen <= 0.001) continue
@@ -121,7 +218,6 @@ object StreetChaseEngine {
             segmentBearing = calculateBearing(pStart, pEnd)
 
             if (remaining <= segLen) {
-                // Exact point is located on this street segment!
                 val t = (remaining / segLen).coerceIn(0.0, 1.0)
                 val lat = pEnd.first + t * (pStart.first - pEnd.first)
                 val lng = pEnd.second + t * (pStart.second - pEnd.second)
@@ -132,8 +228,6 @@ object StreetChaseEngine {
             }
         }
 
-        // 3. If remaining > 0, the zombie is further back than the workout starting point.
-        // Project backwards along the road tangent of the initial street segment.
         if (targetPos == null) {
             val initialStart = fullPath[0]
             val initialNext = fullPath[1]
@@ -143,7 +237,6 @@ object StreetChaseEngine {
             targetPos = projectPoint(initialStart, backwardBearing, remaining)
         }
 
-        // 4. Apply perpendicular lateral offset (remains within the street width / sidewalk)
         val finalPos = if (lateralOffsetMeters != 0.0) {
             val perpBearing = if (lateralOffsetMeters > 0) (segmentBearing + 90f) % 360f else (segmentBearing - 90f + 360f) % 360f
             projectPoint(targetPos, perpBearing, abs(lateralOffsetMeters))
@@ -152,5 +245,42 @@ object StreetChaseEngine {
         }
 
         return ChasePoint(finalPos, segmentBearing)
+    }
+
+    /**
+     * Builds the pursuit path connecting the lead zombie to the runner along the real street.
+     */
+    fun getPursuitTrailPoints(
+        streetPrefix: List<Pair<Double, Double>>,
+        pathPoints: List<Pair<Double, Double>>,
+        currentLocation: Pair<Double, Double>?,
+        zombiePos: Pair<Double, Double>
+    ): List<Pair<Double, Double>> {
+        val fullPath = mutableListOf<Pair<Double, Double>>()
+        if (streetPrefix.isNotEmpty()) fullPath.addAll(streetPrefix)
+        if (pathPoints.isNotEmpty()) fullPath.addAll(pathPoints)
+        if (currentLocation != null && (fullPath.isEmpty() || fullPath.last() != currentLocation)) {
+            fullPath.add(currentLocation)
+        }
+
+        if (fullPath.size < 2) return emptyList()
+
+        var closestIdx = 0
+        var minDist = Double.MAX_VALUE
+        for (i in fullPath.indices) {
+            val d = calculateDistanceMeters(zombiePos, fullPath[i])
+            if (d < minDist) {
+                minDist = d
+                closestIdx = i
+            }
+        }
+
+        val trail = mutableListOf<Pair<Double, Double>>()
+        trail.add(zombiePos)
+        for (i in closestIdx until fullPath.size) {
+            trail.add(fullPath[i])
+        }
+
+        return trail
     }
 }

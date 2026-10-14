@@ -67,9 +67,10 @@ import java.io.File
 /**
  * 100% Native OpenStreetMap View powered by osmdroid.
  * Features:
- * - Real Street Route Navigation: Zombies follow the real street polyline traversed by the runner.
- * - Dynamic Multi-Frame Animation: Running stride animation for Runner & lunging claw attacks for Zombies.
- * - High accuracy GPS positioning, smooth auto-centering, and offline tile caching.
+ * - Real Street Snapping & Routing: Uses OpenStreetMap OSRM street network so zombies always
+ *   spawn and pursue along the actual real-world street, following every turn and intersection.
+ * - Glowing Red Pursuit Trail: Shows the exact road polyline connecting the zombie horde to the runner.
+ * - AAA Game-Quality Animated Sprites: 8 FPS multi-frame athletic sprint and monster claw attack sprites.
  */
 @Composable
 fun RealStreetZombieMapView(
@@ -84,6 +85,9 @@ fun RealStreetZombieMapView(
     var isTopoLayer by remember { mutableStateOf(false) }
     var hasAutoCentered by remember { mutableStateOf(false) }
 
+    // Pre-fetched real OpenStreetMap street prefix nodes
+    var streetPrefix by remember { mutableStateOf<List<Pair<Double, Double>>>(emptyList()) }
+
     // Fallback coordinate only if GPS is completely unavailable
     val defaultLat = currentLocation?.first ?: 10.7769
     val defaultLng = currentLocation?.second ?: 106.7009
@@ -94,6 +98,21 @@ fun RealStreetZombieMapView(
         while (true) {
             delay(125L)
             animFrame = (animFrame + 1) % 4
+        }
+    }
+
+    // Automatically snap to nearest OpenStreetMap street and fetch road geometry
+    LaunchedEffect(currentLocation) {
+        if (currentLocation != null) {
+            val nodes = StreetChaseEngine.fetchRealStreetPathBehind(
+                lat = currentLocation.first,
+                lng = currentLocation.second,
+                bearingDeg = currentBearing,
+                distanceMeters = 120.0
+            )
+            if (nodes.isNotEmpty()) {
+                streetPrefix = nodes
+            }
         }
     }
 
@@ -126,13 +145,24 @@ fun RealStreetZombieMapView(
         }
     }
 
-    // Native Polyline for runner route
+    // Native Polyline for runner route (Cyan)
     val routePolyline = remember {
         Polyline(mapView).apply {
             outlinePaint.color = android.graphics.Color.parseColor("#06B6D4")
             outlinePaint.strokeWidth = 14f
             outlinePaint.strokeCap = Paint.Cap.ROUND
             outlinePaint.strokeJoin = Paint.Join.ROUND
+        }
+    }
+
+    // Native Polyline for Zombie Pursuit Trail (Crimson Red along real street)
+    val zombieTrailPolyline = remember {
+        Polyline(mapView).apply {
+            outlinePaint.color = android.graphics.Color.parseColor("#EF4444")
+            outlinePaint.strokeWidth = 9f
+            outlinePaint.strokeCap = Paint.Cap.ROUND
+            outlinePaint.strokeJoin = Paint.Join.ROUND
+            outlinePaint.alpha = 190
         }
     }
 
@@ -173,13 +203,6 @@ fun RealStreetZombieMapView(
         }
     }
 
-    // Ensure persistent route polyline is attached
-    LaunchedEffect(mapView) {
-        if (!mapView.overlays.contains(routePolyline)) {
-            mapView.overlays.add(routePolyline)
-        }
-    }
-
     // Auto-center camera whenever the user's real location is first discovered
     LaunchedEffect(currentLocation) {
         if (currentLocation != null) {
@@ -206,6 +229,7 @@ fun RealStreetZombieMapView(
     LaunchedEffect(
         animFrame,
         pathPoints,
+        streetPrefix,
         currentLocation,
         currentBearing,
         zombieState.distanceMeters,
@@ -237,6 +261,9 @@ fun RealStreetZombieMapView(
                 if (!mapView.overlays.contains(startMarker)) {
                     mapView.overlays.add(startMarker)
                 }
+                if (!mapView.overlays.contains(routePolyline)) {
+                    mapView.overlays.add(routePolyline)
+                }
             }
 
             // 3. Update Real Street Zombie Horde Navigation
@@ -246,6 +273,7 @@ fun RealStreetZombieMapView(
 
                 // Zombie 1: Alpha Leader (chases strictly along the center of the real street polyline)
                 val leadChase = StreetChaseEngine.getPointAlongPathBackwards(
+                    streetPrefix = streetPrefix,
                     pathPoints = pathPoints,
                     currentLocation = currentLocation,
                     currentBearing = currentBearing,
@@ -264,6 +292,7 @@ fun RealStreetZombieMapView(
                 // Zombie 2: Flank Stalker (chases 5m behind along real street, on right side of road +1.8m)
                 val flank1Dist = distM + 5.0
                 val flank1Chase = StreetChaseEngine.getPointAlongPathBackwards(
+                    streetPrefix = streetPrefix,
                     pathPoints = pathPoints,
                     currentLocation = currentLocation,
                     currentBearing = currentBearing,
@@ -282,6 +311,7 @@ fun RealStreetZombieMapView(
                 // Zombie 3: Toxic Mutant (chases 10m behind along real street, on left side of road -1.8m)
                 val flank2Dist = distM + 10.0
                 val flank2Chase = StreetChaseEngine.getPointAlongPathBackwards(
+                    streetPrefix = streetPrefix,
                     pathPoints = pathPoints,
                     currentLocation = currentLocation,
                     currentBearing = currentBearing,
@@ -297,16 +327,34 @@ fun RealStreetZombieMapView(
                     zombieType = 2
                 )
 
+                // 4. Update Glowing Red Pursuit Trail along real street
+                val pursuitPoints = StreetChaseEngine.getPursuitTrailPoints(
+                    streetPrefix = streetPrefix,
+                    pathPoints = pathPoints,
+                    currentLocation = currentLocation,
+                    zombiePos = leadChase.position
+                )
+                if (pursuitPoints.size >= 2) {
+                    zombieTrailPolyline.setPoints(pursuitPoints.map { GeoPoint(it.first, it.second) })
+                    if (!mapView.overlays.contains(zombieTrailPolyline)) {
+                        mapView.overlays.add(0, zombieTrailPolyline)
+                    }
+                } else {
+                    mapView.overlays.remove(zombieTrailPolyline)
+                }
+
                 if (!mapView.overlays.contains(zombieLeadMarker)) mapView.overlays.add(zombieLeadMarker)
                 if (!mapView.overlays.contains(zombieFlank1Marker)) mapView.overlays.add(zombieFlank1Marker)
                 if (!mapView.overlays.contains(zombieFlank2Marker)) mapView.overlays.add(zombieFlank2Marker)
             } else {
+                mapView.overlays.remove(zombieTrailPolyline)
                 mapView.overlays.remove(zombieLeadMarker)
                 mapView.overlays.remove(zombieFlank1Marker)
                 mapView.overlays.remove(zombieFlank2Marker)
             }
         } else {
             mapView.overlays.remove(runnerMarker)
+            mapView.overlays.remove(zombieTrailPolyline)
             mapView.overlays.remove(zombieLeadMarker)
             mapView.overlays.remove(zombieFlank1Marker)
             mapView.overlays.remove(zombieFlank2Marker)
