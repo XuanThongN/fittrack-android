@@ -139,6 +139,7 @@ fun RunScreen(
     val offTrackDistanceMeters by RunningSessionManager.offTrackDistanceMeters.collectAsState()
     val routeProgressRatio by RunningSessionManager.routeProgressRatio.collectAsState()
     val countdownSeconds by RunningSessionManager.countdownSeconds.collectAsState()
+    val roadmapRoutingMode by RunningSessionManager.roadmapRoutingMode.collectAsState()
 
     var showSaveRoadmapDialog by remember { mutableStateOf(false) }
     var showSavedRoadmapsDialog by remember { mutableStateOf(false) }
@@ -483,7 +484,7 @@ fun RunScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = "🎯 Chạm bản đồ để cắm điểm mốc",
                                     fontSize = 13.sp,
@@ -491,9 +492,9 @@ fun RunScreen(
                                     color = Color(0xFFA855F7)
                                 )
                                 Text(
-                                    text = "Đường OSRM sẽ tự khớp theo đường phố thật",
+                                    text = if (roadmapRoutingMode == "trail") "Bám chuẩn mép hồ & công viên (không kéo ra đường xe máy)" else "Tự động uốn theo các tuyến phố lớn",
                                     fontSize = 10.sp,
-                                    color = TextMuted
+                                    color = if (roadmapRoutingMode == "trail") EmeraldPrimary else TextMuted
                                 )
                             }
 
@@ -509,6 +510,60 @@ fun RunScreen(
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFFA855F7)
                                 )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        // Routing Mode Selector: Ven Hồ/Công Viên vs Bám Phố
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(DarkBackground)
+                                .padding(3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1.3f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (roadmapRoutingMode == "trail") Color(0xFFA855F7) else Color.Transparent)
+                                    .clickable { RunningSessionManager.setRoadmapRoutingMode("trail") }
+                                    .padding(vertical = 6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("🏃", fontSize = 12.sp)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Ven Hồ & Lối Mòn",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (roadmapRoutingMode == "trail") Color.White else TextMuted
+                                    )
+                                }
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (roadmapRoutingMode == "street") CyanRun else Color.Transparent)
+                                    .clickable { RunningSessionManager.setRoadmapRoutingMode("street") }
+                                    .padding(vertical = 6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("🚶", fontSize = 12.sp)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Bám Đường Phố",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (roadmapRoutingMode == "street") DarkBackground else TextMuted
+                                    )
+                                }
                             }
                         }
 

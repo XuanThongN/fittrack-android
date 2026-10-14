@@ -162,6 +162,15 @@ fun RealStreetZombieMapView(
         MapEventsOverlay(object : MapEventsReceiver {
             override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean {
                 if (p != null && RunningSessionManager.isPlanningRoadmap.value) {
+                    try {
+                        val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                            vibrator?.vibrate(android.os.VibrationEffect.createOneShot(40, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+                        } else {
+                            @Suppress("DEPRECATION")
+                            vibrator?.vibrate(40)
+                        }
+                    } catch (_: Exception) {}
                     RunningSessionManager.addWaypoint(p.latitude, p.longitude)
                     return true
                 }
@@ -181,6 +190,17 @@ fun RealStreetZombieMapView(
             controller.setZoom(17.5)
             controller.setCenter(GeoPoint(defaultLat, defaultLng))
             overlays.add(0, mapEventsOverlay)
+            setOnTouchListener { v, event ->
+                when (event.action) {
+                    android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_MOVE -> {
+                        v.parent?.requestDisallowInterceptTouchEvent(true)
+                    }
+                    android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                        v.parent?.requestDisallowInterceptTouchEvent(false)
+                    }
+                }
+                false
+            }
         }
     }
 
@@ -484,7 +504,7 @@ fun RealStreetZombieMapView(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(230.dp)
+            .height(if (isPlanningRoadmap) 380.dp else 230.dp)
             .clip(RoundedCornerShape(20.dp))
             .background(CardSurface)
     ) {

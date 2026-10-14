@@ -110,6 +110,10 @@ object RunningSessionManager {
     private val _countdownSeconds = MutableStateFlow<Int?>(null)
     val countdownSeconds: StateFlow<Int?> = _countdownSeconds.asStateFlow()
 
+    // Roadmap Routing Mode: "trail" (Đường ven hồ/công viên/lối mòn) or "street" (Đường phố)
+    private val _roadmapRoutingMode = MutableStateFlow("trail")
+    val roadmapRoutingMode: StateFlow<String> = _roadmapRoutingMode.asStateFlow()
+
     private var lastZombieWarningSec = 0L
     private var lastAnnouncedKm = 0
     private var lastOffTrackWarningSec = 0L
@@ -507,6 +511,11 @@ object RunningSessionManager {
         }
     }
 
+    fun setRoadmapRoutingMode(mode: String) {
+        _roadmapRoutingMode.value = mode
+        recalculateRoadmapRoute()
+    }
+
     private fun recalculateRoadmapRoute() {
         val wps = _draftWaypoints.value
         if (wps.size < 2) {
@@ -515,7 +524,7 @@ object RunningSessionManager {
         }
         roadmapRouteJob?.cancel()
         roadmapRouteJob = scope.launch {
-            val route = RoadmapEngine.calculateRoute(wps)
+            val route = RoadmapEngine.calculateRoute(wps, _roadmapRoutingMode.value)
             _plannedRoute.value = route
         }
     }
