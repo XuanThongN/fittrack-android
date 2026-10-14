@@ -24,6 +24,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DirectionsRun
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Lock
@@ -115,6 +116,8 @@ fun RunScreen(
     val mapMode by RunningSessionManager.mapMode.collectAsState()
     val isMuted by RunningSessionManager.isMuted.collectAsState()
     val keepScreenOn by RunningSessionManager.keepScreenOn.collectAsState()
+    val lastFinishedRun by RunningSessionManager.lastFinishedRun.collectAsState()
+    var runToDelete by remember { mutableStateOf<RunSession?>(null) }
 
     val locationTracker = RunningSessionManager.locationTracker
     val gpsDistanceMeters by locationTracker?.distanceMeters?.collectAsState() ?: remember { mutableDoubleStateOf(0.0) }
@@ -710,13 +713,57 @@ fun RunScreen(
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 runs.forEach { run ->
-                    RunHistoryItem(run = run)
+                    RunHistoryItem(
+                        run = run,
+                        onDelete = { runToDelete = run }
+                    )
                 }
             }
         }
 
         // Bottom space so nothing is clipped by navigation bar
         Spacer(modifier = Modifier.height(90.dp))
+    }
+
+    // Delete Run Confirmation Dialog
+    if (runToDelete != null) {
+        val target = runToDelete!!
+        AlertDialog(
+            onDismissRequest = { runToDelete = null },
+            title = { Text("Xác Nhận Xóa Buổi Chạy", fontWeight = FontWeight.Bold, color = TextPrimary) },
+            text = {
+                Text(
+                    "Bạn có chắc muốn xóa buổi chạy ngày ${target.getFormattedDate()} (${target.distanceKmFormatted()})?",
+                    color = TextSecondary
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        coroutineScope.launch {
+                            repository.deleteRun(target.id)
+                            runToDelete = null
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DangerRed)
+                ) {
+                    Text("Xóa", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { runToDelete = null }) {
+                    Text("Hủy", color = TextMuted)
+                }
+            }
+        )
+    }
+
+    // Celebratory Post-Run Summary Dialog
+    if (lastFinishedRun != null) {
+        PostRunSummaryDialog(
+            run = lastFinishedRun!!,
+            onDismiss = { RunningSessionManager.clearLastFinishedRun() }
+        )
     }
 
     // Manual Run Add Dialog
@@ -747,7 +794,10 @@ fun RunScreen(
 }
 
 @Composable
-fun RunHistoryItem(run: RunSession) {
+fun RunHistoryItem(
+    run: RunSession,
+    onDelete: () -> Unit
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = CardSurface),
@@ -793,21 +843,132 @@ fun RunHistoryItem(run: RunSession) {
                 }
             }
 
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = run.distanceKmFormatted(),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = CyanLight
-                )
-                Text(
-                    text = "${run.durationFormatted()} • ${run.caloriesFormatted()}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextMuted
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = run.distanceKmFormatted(),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = CyanLight
+                    )
+                    Text(
+                        text = "${run.durationFormatted()} • ${run.caloriesFormatted()}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextMuted
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Xóa",
+                        tint = TextMuted.copy(alpha = 0.6f),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         }
     }
+}
+
+@Composable
+fun PostRunSummaryDialog(
+    run: RunSession,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(text = "🎉", fontSize = 26.sp)
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Text(
+                        text = "Hoàn Thành Buổi Chạy!",
+                        fontWeight = FontWeight.ExtraBold,
+                        color = TextPrimary,
+                        fontSize = 18.sp
+                    )
+                    Text(
+                        text = run.getFormattedDate(),
+                        fontSize = 12.sp,
+                        color = TextSecondary
+                    )
+                }
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Big Distance Pill
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = DarkBackground),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = run.distanceKmFormatted(),
+                            fontSize = 32.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = CyanRun
+                        )
+                        Text(
+                            text = "Tổng quãng đường",
+                            fontSize = 12.sp,
+                            color = TextMuted
+                        )
+                    }
+                }
+
+                // Grid stats
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+                        Text(text = "⏱️ Thời gian", fontSize = 11.sp, color = TextMuted)
+                        Text(text = run.durationFormatted(), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+                        Text(text = "⚡ Pace TB", fontSize = 11.sp, color = TextMuted)
+                        Text(text = run.averagePaceFormatted(), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = EmeraldPrimary)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+                        Text(text = "🔥 Calo", fontSize = 11.sp, color = TextMuted)
+                        Text(text = run.caloriesFormatted(), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = OrangeBurn)
+                    }
+                }
+
+                if (run.notes.isNotBlank()) {
+                    Text(
+                        text = "📝 ${run.notes}",
+                        fontSize = 12.sp,
+                        color = if (run.notes.contains("Zombie")) DangerRed else TextSecondary,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = CyanRun),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Tuyệt Vời & Lưu Lại", color = DarkBackground, fontWeight = FontWeight.Bold)
+            }
+        }
+    )
 }
 
 @Composable

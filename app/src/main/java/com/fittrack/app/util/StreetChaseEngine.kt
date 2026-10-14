@@ -2,6 +2,8 @@ package com.fittrack.app.util
 
 import android.location.Location
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -26,6 +28,7 @@ data class ChasePoint(
  */
 object StreetChaseEngine {
 
+    private val cacheMutex = Mutex()
     private var cachedStreetPrefix: List<Pair<Double, Double>> = emptyList()
     private var lastSnappedCoord: Pair<Double, Double>? = null
 
@@ -77,13 +80,14 @@ object StreetChaseEngine {
         distanceMeters: Double = 120.0
     ): List<Pair<Double, Double>> = withContext(Dispatchers.IO) {
         try {
-            val last = lastSnappedCoord
-            if (last != null && cachedStreetPrefix.isNotEmpty()) {
-                val shift = calculateDistanceMeters(last, Pair(lat, lng))
-                if (shift < 25.0) {
-                    return@withContext cachedStreetPrefix
-                }
+            val cached = cacheMutex.withLock {
+                val last = lastSnappedCoord
+                if (last != null && cachedStreetPrefix.isNotEmpty()) {
+                    val shift = calculateDistanceMeters(last, Pair(lat, lng))
+                    if (shift < 25.0) cachedStreetPrefix else null
+                } else null
             }
+            if (cached != null) return@withContext cached
 
             // 1. Snap to nearest street on OpenStreetMap
             val snapUrl = "https://router.project-osrm.org/nearest/v1/walking/$lng,$lat?number=3"
@@ -141,8 +145,10 @@ object StreetChaseEngine {
             }
 
             if (streetNodes.isNotEmpty()) {
-                cachedStreetPrefix = streetNodes
-                lastSnappedCoord = Pair(snappedLat, snappedLng)
+                cacheMutex.withLock {
+                    cachedStreetPrefix = streetNodes
+                    lastSnappedCoord = Pair(snappedLat, snappedLng)
+                }
                 streetNodes
             } else {
                 emptyList()

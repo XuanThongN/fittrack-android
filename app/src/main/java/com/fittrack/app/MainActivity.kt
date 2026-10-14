@@ -23,7 +23,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        repository = FitTrackRepository(this)
+        repository = FitTrackRepository.getInstance(this)
 
         val target = intent?.getStringExtra("navigate_to")
         val initialScreen = if (target == "RUN") Screen.RUN else Screen.DASHBOARD

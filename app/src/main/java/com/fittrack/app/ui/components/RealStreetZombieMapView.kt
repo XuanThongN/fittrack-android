@@ -32,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -51,6 +52,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.fittrack.app.data.model.ZombieAlertLevel
 import com.fittrack.app.data.model.ZombieChaseState
+import com.fittrack.app.service.RunningSessionManager
 import com.fittrack.app.ui.theme.CardSurface
 import com.fittrack.app.ui.theme.CyanRun
 import com.fittrack.app.ui.theme.DangerRed
@@ -88,8 +90,9 @@ fun RealStreetZombieMapView(
     var isTopoLayer by remember { mutableStateOf(false) }
     var hasAutoCentered by remember { mutableStateOf(false) }
 
-    // Pre-fetched real OpenStreetMap street prefix nodes
-    var streetPrefix by remember { mutableStateOf<List<Pair<Double, Double>>>(emptyList()) }
+    // Pre-fetched real OpenStreetMap street prefix nodes from RunningSessionManager (Single source of truth)
+    val streetPrefix by RunningSessionManager.streetPrefix.collectAsState()
+    var isFollowBearing by remember { mutableStateOf(false) }
 
     // Fallback coordinate only if GPS is completely unavailable
     val defaultLat = currentLocation?.first ?: 10.7769
@@ -101,21 +104,6 @@ fun RealStreetZombieMapView(
         while (true) {
             delay(125L)
             animFrame = (animFrame + 1) % 4
-        }
-    }
-
-    // Automatically snap to nearest OpenStreetMap street and fetch road geometry
-    LaunchedEffect(currentLocation) {
-        if (currentLocation != null) {
-            val nodes = StreetChaseEngine.fetchRealStreetPathBehind(
-                lat = currentLocation.first,
-                lng = currentLocation.second,
-                bearingDeg = currentBearing,
-                distanceMeters = 120.0
-            )
-            if (nodes.isNotEmpty()) {
-                streetPrefix = nodes
-            }
         }
     }
 
@@ -234,6 +222,16 @@ fun RealStreetZombieMapView(
             mapView.setTileSource(TileSourceFactory.OpenTopo)
         } else {
             mapView.setTileSource(TileSourceFactory.MAPNIK)
+        }
+        mapView.invalidate()
+    }
+
+    // Heading rotation (Compass mode)
+    LaunchedEffect(currentBearing, isFollowBearing) {
+        if (isFollowBearing && currentBearing != 0f) {
+            mapView.mapOrientation = -currentBearing
+        } else {
+            mapView.mapOrientation = 0f
         }
         mapView.invalidate()
     }
@@ -512,6 +510,21 @@ fun RealStreetZombieMapView(
                     contentDescription = "Thu nhỏ",
                     tint = Color.White,
                     modifier = Modifier.size(18.dp)
+                )
+            }
+
+            // Toggle Heading Follow / Compass
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(if (isFollowBearing) CyanRun else DarkBackground.copy(alpha = 0.92f))
+                    .clickable { isFollowBearing = !isFollowBearing },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = if (isFollowBearing) "🧭" else "⬆️",
+                    fontSize = 15.sp
                 )
             }
 

@@ -49,7 +49,7 @@ class RunningTrackerService : Service() {
         when (intent?.action) {
             ACTION_PAUSE -> RunningSessionManager.pauseRun(this)
             ACTION_RESUME -> RunningSessionManager.resumeRun(this)
-            ACTION_STOP -> RunningSessionManager.requestStop()
+            ACTION_STOP -> RunningSessionManager.requestStop(this)
             else -> {
                 val notification = buildNotification()
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

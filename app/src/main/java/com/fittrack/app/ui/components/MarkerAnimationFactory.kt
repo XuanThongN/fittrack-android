@@ -11,6 +11,7 @@ import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.drawable.BitmapDrawable
+import android.util.LruCache
 import com.fittrack.app.data.model.ZombieAlertLevel
 
 /**
@@ -18,8 +19,13 @@ import com.fittrack.app.data.model.ZombieAlertLevel
  * Produces polished, high-resolution, game-quality animated character sprites
  * with layered lighting, aerodynamic athletic silhouettes, terrifying monster lunges,
  * pulsing shockwave auras, and glassmorphism HUD badges.
+ *
+ * Utilizes LRU caching to eliminate GC pressure and prevent frame drops during 8 FPS animation loops.
  */
 object MarkerAnimationFactory {
+
+    private val runnerCache = HashMap<String, BitmapDrawable>()
+    private val zombieCache = LruCache<String, BitmapDrawable>(128)
 
     /**
      * Generates a high-definition animated frame for the Runner character.
@@ -29,6 +35,9 @@ object MarkerAnimationFactory {
         frame: Int,
         isMoving: Boolean
     ): BitmapDrawable {
+        val key = "$frame-$isMoving"
+        runnerCache[key]?.let { return it }
+
         val w = 130
         val h = 156
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
@@ -291,9 +300,9 @@ object MarkerAnimationFactory {
             isFakeBoldText = true
             textAlign = Paint.Align.CENTER
         }
-        canvas.drawText("🏃 BẠN (LIVE)", cx, badgeY + 18f, textPaint)
-
-        return BitmapDrawable(context.resources, bitmap)
+        val drawable = BitmapDrawable(context.resources, bitmap)
+        runnerCache[key] = drawable
+        return drawable
     }
 
     /**
@@ -308,6 +317,9 @@ object MarkerAnimationFactory {
         alertLevel: ZombieAlertLevel,
         zombieType: Int
     ): BitmapDrawable {
+        val key = "$zombieType-$frame-$distMeters"
+        zombieCache.get(key)?.let { return it }
+
         val w = 130
         val h = 156
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
@@ -593,6 +605,8 @@ object MarkerAnimationFactory {
         }
         canvas.drawText("$prefix $nameTitle ${distMeters}m", cx, badgeY + 18f, textPaint)
 
-        return BitmapDrawable(context.resources, bitmap)
+        val drawable = BitmapDrawable(context.resources, bitmap)
+        zombieCache.put(key, drawable)
+        return drawable
     }
 }

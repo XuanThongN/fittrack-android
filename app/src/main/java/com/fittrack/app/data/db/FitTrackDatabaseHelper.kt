@@ -289,4 +289,9 @@ class FitTrackDatabaseHelper(context: Context) :
         cursor.close()
         return list
     }
+
+    fun deleteRun(id: Long): Int {
+        val db = writableDatabase
+        return db.delete(TABLE_RUN, "$COL_ID = ?", arrayOf(id.toString()))
+    }
 }

@@ -22,8 +22,6 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:showWhenLocked="true"
-            android:turnScreenOn="true"
             android:theme="@style/Theme.FitTrack"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>

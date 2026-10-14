@@ -77,7 +77,15 @@ object RunningSessionManager {
     private val _stopRequested = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val stopRequested: SharedFlow<Unit> = _stopRequested.asSharedFlow()
 
+    private val _lastFinishedRun = MutableStateFlow<RunSession?>(null)
+    val lastFinishedRun: StateFlow<RunSession?> = _lastFinishedRun.asStateFlow()
+
     private var lastZombieWarningSec = 0L
+    private var lastAnnouncedKm = 0
+
+    fun clearLastFinishedRun() {
+        _lastFinishedRun.value = null
+    }
 
     fun initTracker(context: Context) {
         val appContext = context.applicationContext
@@ -104,6 +112,7 @@ object RunningSessionManager {
         _elapsedSeconds.value = 0L
         _manualDistanceMeters.value = 0.0
         lastZombieWarningSec = 0L
+        lastAnnouncedKm = 0
 
         _zombieState.value = ZombieChaseState(
             isEnabled = isZombieMode,
@@ -142,6 +151,22 @@ object RunningSessionManager {
                     _elapsedSeconds.value++
 
                     val currentTotalDist = getTotalDistanceMeters()
+
+                    // Voice Coach KM milestone announcement
+                    val currentKm = (currentTotalDist / 1000.0).toInt()
+                    if (currentKm > lastAnnouncedKm && currentKm > 0) {
+                        lastAnnouncedKm = currentKm
+                        val paceSec = if (currentTotalDist > 0) (_elapsedSeconds.value / (currentTotalDist / 1000.0)).toLong() else 0L
+                        val repo = FitTrackRepository.getInstance(appContext)
+                        val cal = (repo.getLatestWeight() * (currentTotalDist / 1000.0) * 1.036).toInt()
+                        voiceCoach?.speakKmMilestone(currentKm, paceSec, cal)
+                    }
+
+                    // Periodic real street route refresh every 15s
+                    if (_elapsedSeconds.value % 15L == 0L) {
+                        fetchStreetPrefixIfAvailable()
+                    }
+
                     val zState = _zombieState.value
 
                     if (zState.isEnabled) {
@@ -235,12 +260,25 @@ object RunningSessionManager {
             notes = notes
         )
         repository.addRunSession(session)
+        _lastFinishedRun.value = session
         stopRun(context)
         return session
     }
 
     fun discardRun(context: Context) {
         stopRun(context)
+    }
+
+    fun requestStop(context: Context) {
+        scope.launch {
+            if (_isRunning.value) {
+                val repo = FitTrackRepository.getInstance(context)
+                val weight = repo.getLatestWeight()
+                val z = _zombieState.value
+                val notes = if (z.isEnabled) "Chạy sinh tồn Zombie (${z.caughtCount} lần bị bắt)" else "Chạy bộ ngoài trời"
+                stopAndSaveRun(context, repo, weight, notes)
+            }
+        }
     }
 
     fun requestStop() {

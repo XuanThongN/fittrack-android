@@ -53,6 +53,12 @@ class FitTrackVoiceCoach(context: Context) : TextToSpeech.OnInitListener {
         speak("Xuất sắc! Buổi tập đã hoàn thành. Bạn đã đốt cháy $calories calo.")
     }
 
+    fun speakKmMilestone(km: Int, paceSec: Long, calories: Int) {
+        val pm = paceSec / 60
+        val ps = paceSec % 60
+        speak("Bạn đã hoàn thành $km kilômét! Pace $pm phút $ps giây. Đã đốt $calories calo. Cố lên nào!")
+    }
+
     // ZOMBIE CHASE AUDIO ALERTS
     fun speakZombieStart(difficultyTitle: String) {
         speak("Kích hoạt chế độ sinh tồn! Đàn $difficultyTitle đang ở sau lưng bạn 80 mét. Chạy ngay, đừng dừng lại!")

@@ -79,6 +79,11 @@ class FitTrackRepository(context: Context) {
         _runSessions.value = dbHelper.getAllRuns()
     }
 
+    suspend fun deleteRun(id: Long) = withContext(Dispatchers.IO) {
+        dbHelper.deleteRun(id)
+        _runSessions.value = dbHelper.getAllRuns()
+    }
+
     // STATISTICAL HELPERS
     fun getLatestWeight(): Double {
         return _weightEntries.value.firstOrNull()?.weightKg ?: _userProfile.value.initialWeightKg
@@ -109,5 +114,16 @@ class FitTrackRepository(context: Context) {
 
     fun getTotalWorkoutMinutes(): Int {
         return _workoutSessions.value.sumOf { it.durationSeconds } / 60
+    }
+
+    companion object {
+        @Volatile
+        private var INSTANCE: FitTrackRepository? = null
+
+        fun getInstance(context: Context): FitTrackRepository {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: FitTrackRepository(context.applicationContext).also { INSTANCE = it }
+            }
+        }
     }
 }
