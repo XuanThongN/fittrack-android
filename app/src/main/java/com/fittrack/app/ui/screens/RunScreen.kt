@@ -840,8 +840,7 @@ fun RunScreen(
                         fontWeight = FontWeight.ExtraBold
                     )
                 }
-            }
-        } else {
+            } else {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
