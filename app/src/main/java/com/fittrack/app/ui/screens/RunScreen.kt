@@ -165,8 +165,32 @@ fun RunScreen(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
-        if (fineGranted) {
-            locationTracker.startTracking()
+        val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
+        if (fineGranted || coarseGranted) {
+            locationTracker.startListening()
+            if (isRunning) {
+                locationTracker.startTracking()
+            }
+        }
+    }
+
+    // Automatically request permissions and start GPS listening on screen enter
+    LaunchedEffect(Unit) {
+        if (locationTracker.hasPermission()) {
+            locationTracker.startListening()
+        } else {
+            permissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
+    }
+
+    DisposableEffect(locationTracker) {
+        onDispose {
+            locationTracker.destroy()
         }
     }
 

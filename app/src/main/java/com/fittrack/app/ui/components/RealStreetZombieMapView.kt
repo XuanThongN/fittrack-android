@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.drawable.BitmapDrawable
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -63,8 +64,8 @@ import java.io.File
 
 /**
  * 100% Native OpenStreetMap View powered by osmdroid.
- * Renders real OpenStreetMap tiles (Mapnik with Vietnamese road names & OpenTopo) directly
- * on Android hardware canvas with ZERO WebView bugs, 60 FPS scrolling, and native markers.
+ * Features automatic auto-centering on real user GPS/Network location,
+ * live marker tracking, 3-zombie chase pursuit, and accurate positioning.
  */
 @Composable
 fun RealStreetZombieMapView(
@@ -75,7 +76,9 @@ fun RealStreetZombieMapView(
 ) {
     val context = LocalContext.current
     var isTopoLayer by remember { mutableStateOf(false) }
+    var hasAutoCentered by remember { mutableStateOf(false) }
 
+    // Fallback coordinate only if GPS is completely unavailable
     val defaultLat = currentLocation?.first ?: 10.7769
     val defaultLng = currentLocation?.second ?: 106.7009
 
@@ -157,13 +160,22 @@ fun RealStreetZombieMapView(
         }
     }
 
-    // Ensure persistent overlays are attached
+    // Ensure persistent route polyline is attached
     LaunchedEffect(mapView) {
         if (!mapView.overlays.contains(routePolyline)) {
             mapView.overlays.add(routePolyline)
         }
-        if (!mapView.overlays.contains(runnerMarker)) {
-            mapView.overlays.add(runnerMarker)
+    }
+
+    // Auto-center camera whenever the user's real location is first discovered
+    LaunchedEffect(currentLocation) {
+        if (currentLocation != null) {
+            val userGeo = GeoPoint(currentLocation.first, currentLocation.second)
+            if (!hasAutoCentered) {
+                mapView.controller.animateTo(userGeo)
+                mapView.controller.setZoom(17.5)
+                hasAutoCentered = true
+            }
         }
     }
 
@@ -179,54 +191,64 @@ fun RealStreetZombieMapView(
 
     // Live update coordinates, route, and zombies
     LaunchedEffect(pathPoints, currentLocation, zombieState.distanceMeters, zombieState.isEnabled) {
-        val curLat = currentLocation?.first ?: defaultLat
-        val curLng = currentLocation?.second ?: defaultLng
-        val runnerGeo = GeoPoint(curLat, curLng)
+        if (currentLocation != null) {
+            val curLat = currentLocation.first
+            val curLng = currentLocation.second
+            val runnerGeo = GeoPoint(curLat, curLng)
 
-        // Update runner position
-        runnerMarker.position = runnerGeo
-
-        // Update route polyline
-        if (pathPoints.isNotEmpty()) {
-            val geoPoints = pathPoints.map { GeoPoint(it.first, it.second) }
-            routePolyline.setPoints(geoPoints)
-
-            // Draw start flag at first point
-            startMarker.position = GeoPoint(pathPoints.first().first, pathPoints.first().second)
-            if (!mapView.overlays.contains(startMarker)) {
-                mapView.overlays.add(startMarker)
-            }
-        }
-
-        // Update Zombie Horde
-        if (zombieState.isEnabled) {
-            val distM = zombieState.distanceMeters.coerceAtLeast(1.0)
-            val distRounded = (distM / 5).toInt() * 5
-
-            // Position zombies along real street path behind runner
-            var zLat = curLat - (distM * 0.000009)
-            var zLng = curLng
-
-            if (pathPoints.size >= 2) {
-                val backStep = (distM / 15).toInt().coerceAtMost(pathPoints.size - 1)
-                val targetIdx = (pathPoints.size - 1 - backStep).coerceAtLeast(0)
-                zLat = pathPoints[targetIdx].first
-                zLng = pathPoints[targetIdx].second
+            // Update runner marker
+            runnerMarker.position = runnerGeo
+            if (!mapView.overlays.contains(runnerMarker)) {
+                mapView.overlays.add(runnerMarker)
             }
 
-            zombieLeadMarker.position = GeoPoint(zLat, zLng)
-            zombieLeadMarker.icon = createZombieMarkerDrawable(context, distRounded)
+            // Update route polyline
+            if (pathPoints.isNotEmpty()) {
+                val geoPoints = pathPoints.map { GeoPoint(it.first, it.second) }
+                routePolyline.setPoints(geoPoints)
 
-            zombieFlank1Marker.position = GeoPoint(zLat - 0.00012, zLng + 0.00012)
-            zombieFlank1Marker.icon = createZombieMarkerDrawable(context, (distRounded + 4))
+                startMarker.position = GeoPoint(pathPoints.first().first, pathPoints.first().second)
+                if (!mapView.overlays.contains(startMarker)) {
+                    mapView.overlays.add(startMarker)
+                }
+            }
 
-            zombieFlank2Marker.position = GeoPoint(zLat - 0.00012, zLng - 0.00012)
-            zombieFlank2Marker.icon = createZombieMarkerDrawable(context, (distRounded + 8))
+            // Update Zombie Horde
+            if (zombieState.isEnabled) {
+                val distM = zombieState.distanceMeters.coerceAtLeast(1.0)
+                val distRounded = (distM / 5).toInt() * 5
 
-            if (!mapView.overlays.contains(zombieLeadMarker)) mapView.overlays.add(zombieLeadMarker)
-            if (!mapView.overlays.contains(zombieFlank1Marker)) mapView.overlays.add(zombieFlank1Marker)
-            if (!mapView.overlays.contains(zombieFlank2Marker)) mapView.overlays.add(zombieFlank2Marker)
+                // Position zombies along real street path behind runner
+                var zLat = curLat - (distM * 0.000009)
+                var zLng = curLng
+
+                if (pathPoints.size >= 2) {
+                    val backStep = (distM / 15).toInt().coerceAtMost(pathPoints.size - 1)
+                    val targetIdx = (pathPoints.size - 1 - backStep).coerceAtLeast(0)
+                    zLat = pathPoints[targetIdx].first
+                    zLng = pathPoints[targetIdx].second
+                }
+
+                zombieLeadMarker.position = GeoPoint(zLat, zLng)
+                zombieLeadMarker.icon = createZombieMarkerDrawable(context, distRounded)
+
+                zombieFlank1Marker.position = GeoPoint(zLat - 0.00012, zLng + 0.00012)
+                zombieFlank1Marker.icon = createZombieMarkerDrawable(context, (distRounded + 4))
+
+                zombieFlank2Marker.position = GeoPoint(zLat - 0.00012, zLng - 0.00012)
+                zombieFlank2Marker.icon = createZombieMarkerDrawable(context, (distRounded + 8))
+
+                if (!mapView.overlays.contains(zombieLeadMarker)) mapView.overlays.add(zombieLeadMarker)
+                if (!mapView.overlays.contains(zombieFlank1Marker)) mapView.overlays.add(zombieFlank1Marker)
+                if (!mapView.overlays.contains(zombieFlank2Marker)) mapView.overlays.add(zombieFlank2Marker)
+            } else {
+                mapView.overlays.remove(zombieLeadMarker)
+                mapView.overlays.remove(zombieFlank1Marker)
+                mapView.overlays.remove(zombieFlank2Marker)
+            }
         } else {
+            // While GPS is searching, remove runner and zombie overlays from default map
+            mapView.overlays.remove(runnerMarker)
             mapView.overlays.remove(zombieLeadMarker)
             mapView.overlays.remove(zombieFlank1Marker)
             mapView.overlays.remove(zombieFlank2Marker)
@@ -307,6 +329,31 @@ fun RealStreetZombieMapView(
             }
         }
 
+        // Bottom Left GPS Status Indicator
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(10.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(DarkBackground.copy(alpha = 0.92f))
+                .padding(horizontal = 8.dp, vertical = 5.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(if (currentLocation != null) EmeraldPrimary else OrangeBurn)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = if (currentLocation != null) "GPS Đã Khóa" else "Đang Dò GPS...",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (currentLocation != null) EmeraldPrimary else OrangeBurn
+            )
+        }
+
         // Map Control Buttons: Zoom In/Out & My Location
         Column(
             modifier = Modifier
@@ -352,9 +399,16 @@ fun RealStreetZombieMapView(
             // Recenter My Location FAB
             FloatingActionButton(
                 onClick = {
-                    val curLat = currentLocation?.first ?: defaultLat
-                    val curLng = currentLocation?.second ?: defaultLng
-                    mapView.controller.animateTo(GeoPoint(curLat, curLng))
+                    if (currentLocation != null) {
+                        mapView.controller.animateTo(GeoPoint(currentLocation.first, currentLocation.second))
+                        mapView.controller.setZoom(18.0)
+                    } else {
+                        Toast.makeText(
+                            context,
+                            "Đang dò GPS... Vui lòng bật vị trí (Location) trên máy!",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
                 },
                 modifier = Modifier.size(42.dp),
                 containerColor = CyanRun,

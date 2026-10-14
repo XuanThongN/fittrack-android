@@ -28,6 +28,9 @@ class LocationTracker(private val context: Context) : LocationListener {
     private val _isTracking = MutableStateFlow(false)
     val isTracking: StateFlow<Boolean> = _isTracking.asStateFlow()
 
+    private val _isListening = MutableStateFlow(false)
+    val isListening: StateFlow<Boolean> = _isListening.asStateFlow()
+
     // GPS route path points (latitude, longitude) for drawing on Map
     private val _pathPoints = MutableStateFlow<List<Pair<Double, Double>>>(emptyList())
     val pathPoints: StateFlow<List<Pair<Double, Double>>> = _pathPoints.asStateFlow()
@@ -35,45 +38,75 @@ class LocationTracker(private val context: Context) : LocationListener {
     private val _currentLocation = MutableStateFlow<Pair<Double, Double>?>(null)
     val currentLocation: StateFlow<Pair<Double, Double>?> = _currentLocation.asStateFlow()
 
+    init {
+        // Query best last known location immediately upon instantiation
+        fetchBestLastKnownLocation()
+    }
+
     fun hasPermission(): Boolean {
-        return ContextCompat.checkSelfPermission(
+        val fine = ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.ACCESS_FINE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        return fine || coarse
     }
 
     @SuppressLint("MissingPermission")
-    fun startTracking() {
-        if (!hasPermission() || locationManager == null) return
+    fun fetchBestLastKnownLocation(): Pair<Double, Double>? {
+        if (!hasPermission() || locationManager == null) return null
 
-        _distanceMeters.value = 0.0
-        _pathPoints.value = emptyList()
-        lastLocation = null
-        _isTracking.value = true
+        val providers = listOf(
+            LocationManager.GPS_PROVIDER,
+            LocationManager.NETWORK_PROVIDER,
+            LocationManager.PASSIVE_PROVIDER
+        )
+        var bestLoc: Location? = null
+
+        for (provider in providers) {
+            try {
+                if (locationManager.isProviderEnabled(provider)) {
+                    val loc = locationManager.getLastKnownLocation(provider) ?: continue
+                    if (bestLoc == null || loc.time > bestLoc.time) {
+                        bestLoc = loc
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        if (bestLoc != null) {
+            val point = Pair(bestLoc.latitude, bestLoc.longitude)
+            _currentLocation.value = point
+            lastLocation = bestLoc
+            return point
+        }
+        return null
+    }
+
+    @SuppressLint("MissingPermission")
+    fun startListening() {
+        if (!hasPermission() || locationManager == null) return
+        if (_isListening.value) return
+
+        fetchBestLastKnownLocation()
+        _isListening.value = true
 
         try {
-            // Get last known location right away to show on map immediately
-            val lastGps = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-            val lastNet = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-            val initial = lastGps ?: lastNet
-            if (initial != null) {
-                _currentLocation.value = Pair(initial.latitude, initial.longitude)
-                _pathPoints.value = listOf(Pair(initial.latitude, initial.longitude))
-                lastLocation = initial
-            }
-
             if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 locationManager.requestLocationUpdates(
                     LocationManager.GPS_PROVIDER,
-                    1500L, // 1.5 seconds
-                    2f,    // 2 meters
+                    1000L, // 1 second
+                    1f,    // 1 meter
                     this
                 )
             }
             if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
                 locationManager.requestLocationUpdates(
                     LocationManager.NETWORK_PROVIDER,
-                    2000L,
+                    1500L,
                     2f,
                     this
                 )
@@ -81,48 +114,83 @@ class LocationTracker(private val context: Context) : LocationListener {
         } catch (_: Exception) {}
     }
 
+    fun stopListening() {
+        _isListening.value = false
+        if (!_isTracking.value) {
+            try {
+                locationManager?.removeUpdates(this)
+            } catch (_: Exception) {}
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    fun startTracking() {
+        if (!hasPermission() || locationManager == null) return
+
+        startListening()
+        _distanceMeters.value = 0.0
+        _isTracking.value = true
+
+        val cur = _currentLocation.value
+        if (cur != null) {
+            _pathPoints.value = listOf(cur)
+        } else {
+            _pathPoints.value = emptyList()
+        }
+        lastLocation = null
+    }
+
     fun stopTracking() {
         _isTracking.value = false
-        try {
-            locationManager?.removeUpdates(this)
-        } catch (_: Exception) {}
+        // Keep listening active so the map continues to show current position
     }
 
     fun reset() {
         stopTracking()
         _distanceMeters.value = 0.0
         _pathPoints.value = emptyList()
-        _currentLocation.value = null
-        lastLocation = null
         _currentSpeedMps.value = 0f
+        lastLocation = null
+    }
+
+    fun destroy() {
+        _isTracking.value = false
+        _isListening.value = false
+        try {
+            locationManager?.removeUpdates(this)
+        } catch (_: Exception) {}
     }
 
     override fun onLocationChanged(location: Location) {
-        if (!_isTracking.value) return
-        if (location.hasAccuracy() && location.accuracy > 35f) return
-
         val point = Pair(location.latitude, location.longitude)
+
+        // Always update current location pin for map display
         _currentLocation.value = point
+
+        if (location.hasSpeed()) {
+            _currentSpeedMps.value = location.speed
+        }
+
+        // If not actively running a workout, don't accumulate distance
+        if (!_isTracking.value) return
+
+        // For workout distance tracking, filter out unrealistic jumps or jitter
+        if (location.hasAccuracy() && location.accuracy > 45f) return
 
         val prev = lastLocation
         if (prev != null) {
             val delta = prev.distanceTo(location)
-            // Filter realistic running movements (between 1.5m and 50m per interval)
-            if (delta in 1.5..50.0) {
+            // Filter realistic movement (between 1.0m and 50m per interval)
+            if (delta in 1.0..50.0) {
                 _distanceMeters.value += delta
                 val currentList = _pathPoints.value.toMutableList()
                 currentList.add(point)
                 _pathPoints.value = currentList
             }
         } else {
-            // First point
             _pathPoints.value = listOf(point)
         }
         lastLocation = location
-
-        if (location.hasSpeed()) {
-            _currentSpeedMps.value = location.speed
-        }
     }
 
     @Deprecated("Deprecated in Java")
