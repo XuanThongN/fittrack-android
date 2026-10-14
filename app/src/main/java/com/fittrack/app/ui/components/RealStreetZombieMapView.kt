@@ -260,8 +260,8 @@ fun RealStreetZombieMapView(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(300.dp)
-            .clip(RoundedCornerShape(22.dp))
+            .height(220.dp)
+            .clip(RoundedCornerShape(20.dp))
             .background(CardSurface)
     ) {
         // Native OpenStreetMap View

@@ -86,9 +86,9 @@ fun ZombieRadarMap(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .height(280.dp),
+            .height(220.dp),
         colors = CardDefaults.cardColors(containerColor = CardSurface),
-        shape = RoundedCornerShape(22.dp)
+        shape = RoundedCornerShape(20.dp)
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             Canvas(modifier = Modifier.matchParentSize()) {

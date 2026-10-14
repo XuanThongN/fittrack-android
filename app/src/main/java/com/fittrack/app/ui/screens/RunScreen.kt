@@ -21,16 +21,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DirectionsRun
 import androidx.compose.material.icons.filled.LocalFireDepartment
-import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Speed
@@ -38,7 +37,6 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -251,13 +249,16 @@ fun RunScreen(
         }
     }
 
+    val scrollState = rememberScrollState()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(DarkBackground)
-            .padding(horizontal = 16.dp)
+            .verticalScroll(scrollState)
+            .padding(horizontal = 14.dp, vertical = 8.dp)
     ) {
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
         // HEADER
         Row(
@@ -274,12 +275,22 @@ fun RunScreen(
                 )
                 Text(
                     text = if (zombieState.isEnabled) "🧟 Chế độ: Sinh Tồn Zombie Rượt Đuổi" else "Đo quãng đường GPS, tốc độ & calo",
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
                     color = if (zombieState.isEnabled) DangerRed else TextSecondary
                 )
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // Quick Manual Input button
+                IconButton(onClick = { showManualDialog = true }) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Nhập tay",
+                        tint = CyanRun
+                    )
+                }
+
+                // Sound Mute/Unmute
                 IconButton(onClick = {
                     isMuted = !isMuted
                     voiceCoach.isMuted = isMuted
@@ -290,27 +301,12 @@ fun RunScreen(
                         tint = if (isMuted) TextMuted else EmeraldPrimary
                     )
                 }
-
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(if (zombieState.isEnabled) DangerRed.copy(alpha = 0.2f) else CyanRun.copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.DirectionsRun,
-                        contentDescription = null,
-                        tint = if (zombieState.isEnabled) DangerRed else CyanRun,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-        // Map Mode Switcher: Real Street (Đường Phố Thật) vs Tactical Radar (Radar Tác Chiến)
+        // Map Mode Switcher: Real Street vs Tactical Radar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -325,7 +321,7 @@ fun RunScreen(
                     .clip(RoundedCornerShape(8.dp))
                     .background(if (mapMode == "street") CyanRun else Color.Transparent)
                     .clickable { mapMode = "street" }
-                    .padding(vertical = 7.dp),
+                    .padding(vertical = 6.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -346,7 +342,7 @@ fun RunScreen(
                     .clip(RoundedCornerShape(8.dp))
                     .background(if (mapMode == "radar") DangerRed else Color.Transparent)
                     .clickable { mapMode = "radar" }
-                    .padding(vertical = 7.dp),
+                    .padding(vertical = 6.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -364,7 +360,7 @@ fun RunScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Display selected Map View
+        // Display selected Map View (Compact 220dp)
         if (mapMode == "street") {
             RealStreetZombieMapView(
                 pathPoints = pathPoints,
@@ -382,9 +378,229 @@ fun RunScreen(
             )
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
-        // ZOMBIE CHASE TOGGLE & DIFFICULTY CARD
+        // ==========================================
+        // PRIMARY ACTION BUTTON BAR (START / PAUSE / STOP)
+        // PLACED RIGHT UNDER THE MAP - 100% VISIBLE & EASY TO TAP!
+        // ==========================================
+        if (!isRunning) {
+            Button(
+                onClick = {
+                    isRunning = true
+                    isPaused = false
+                    elapsedSeconds = 0L
+                    manualDistanceMeters = 0.0
+                    zombieState = zombieState.copy(distanceMeters = 80.0, alertLevel = ZombieAlertLevel.SAFE)
+                    locationTracker.reset()
+
+                    if (zombieState.isEnabled) {
+                        voiceCoach.speakZombieStart(zombieState.difficulty.title)
+                    }
+
+                    if (locationTracker.hasPermission()) {
+                        locationTracker.startTracking()
+                    } else {
+                        permissionLauncher.launch(
+                            arrayOf(
+                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                Manifest.permission.ACCESS_COARSE_LOCATION
+                            )
+                        )
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (zombieState.isEnabled) DangerRed else CyanRun
+                ),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = null,
+                    tint = if (zombieState.isEnabled) Color.White else DarkBackground,
+                    modifier = Modifier.size(28.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = if (zombieState.isEnabled) "CHẠY TRỐN ZOMBIE NGAY!" else "BẮT ĐẦU CHẠY GPS",
+                    color = if (zombieState.isEnabled) Color.White else DarkBackground,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Button(
+                    onClick = { isPaused = !isPaused },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isPaused) EmeraldPrimary else CardSurface
+                    )
+                ) {
+                    Icon(
+                        imageVector = if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                        contentDescription = null,
+                        tint = if (isPaused) DarkBackground else TextPrimary
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (isPaused) "Tiếp tục" else "Tạm dừng",
+                        color = if (isPaused) DarkBackground else TextPrimary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        isRunning = false
+                        isPaused = false
+                        locationTracker.stopTracking()
+
+                        if (distanceKm > 0.05 || elapsedSeconds > 30) {
+                            val session = RunSession(
+                                startTime = System.currentTimeMillis(),
+                                durationSeconds = elapsedSeconds,
+                                distanceMeters = totalDistanceMeters,
+                                caloriesBurned = caloriesBurned,
+                                averagePaceSecondsPerKm = avgPaceSecPerKm,
+                                isGpsTracked = gpsDistanceMeters > 0,
+                                notes = if (zombieState.isEnabled) "Chạy sinh tồn Zombie (${zombieState.caughtCount} lần bị bắt)" else "Chạy bộ ngoài trời"
+                            )
+                            CoroutineScope(Dispatchers.IO).launch {
+                                repository.addRunSession(session)
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = OrangeBurn)
+                ) {
+                    Icon(imageVector = Icons.Default.Stop, contentDescription = null, tint = DarkBackground)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Kết thúc & Lưu",
+                        color = DarkBackground,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // METRICS DASHBOARD CARD
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = CardSurface),
+            shape = RoundedCornerShape(18.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Large Distance Number
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = String.format(Locale.US, "%.2f", distanceKm),
+                        fontSize = 40.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = CyanLight
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "KM",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextMuted,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Stats Row (Time, Pace, Calories)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceAround
+                ) {
+                    // Time
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Timer, contentDescription = null, tint = CyanLight, modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(text = "Thời gian", style = MaterialTheme.typography.labelSmall, color = TextMuted)
+                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        val hrs = elapsedSeconds / 3600
+                        val mins = (elapsedSeconds % 3600) / 60
+                        val secs = elapsedSeconds % 60
+                        val timeStr = if (hrs > 0) String.format(Locale.US, "%02d:%02d:%02d", hrs, mins, secs)
+                        else String.format(Locale.US, "%02d:%02d", mins, secs)
+                        Text(
+                            text = timeStr,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                    }
+
+                    // Pace
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Speed, contentDescription = null, tint = EmeraldPrimary, modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(text = "Pace", style = MaterialTheme.typography.labelSmall, color = TextMuted)
+                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        val paceStr = if (avgPaceSecPerKm in 1..3600) {
+                            val pm = avgPaceSecPerKm / 60
+                            val ps = avgPaceSecPerKm % 60
+                            String.format(Locale.US, "%d'%02d\"", pm, ps)
+                        } else "--'--\""
+                        Text(
+                            text = paceStr,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = EmeraldPrimary
+                        )
+                    }
+
+                    // Calories
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.LocalFireDepartment, contentDescription = null, tint = OrangeBurn, modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(text = "Calo", style = MaterialTheme.typography.labelSmall, color = TextMuted)
+                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "${caloriesBurned.toInt()} kcal",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = OrangeBurn
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // ZOMBIE CHASE SETTINGS CARD
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
@@ -438,10 +654,9 @@ fun RunScreen(
                     Spacer(modifier = Modifier.height(10.dp))
                     val distFraction = (zombieState.distanceMeters / 120.0).toFloat().coerceIn(0f, 1f)
                     val barColor = when (zombieState.alertLevel) {
-                        ZombieAlertLevel.DANGER -> DangerRed
+                        ZombieAlertLevel.DANGER, ZombieAlertLevel.CAUGHT -> DangerRed
                         ZombieAlertLevel.WARNING -> OrangeBurn
                         ZombieAlertLevel.SAFE -> EmeraldPrimary
-                        ZombieAlertLevel.CAUGHT -> DangerRed
                     }
 
                     LinearProgressIndicator(
@@ -487,220 +702,7 @@ fun RunScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // METRICS DASHBOARD CARD
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = CardSurface),
-            shape = RoundedCornerShape(20.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // DISTANCE DISPLAY
-                Text(
-                    text = String.format(Locale.US, "%.2f", distanceKm),
-                    fontSize = 44.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = CyanLight
-                )
-                Text(
-                    text = "KILOMÉT (KM)",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = TextMuted
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // STATS ROW (TIME, PACE, CALORIES)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Timer, contentDescription = null, tint = TextMuted, modifier = Modifier.size(13.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(text = "Thời gian", style = MaterialTheme.typography.labelSmall, color = TextMuted)
-                        }
-                        Spacer(modifier = Modifier.height(2.dp))
-                        val hrs = elapsedSeconds / 3600
-                        val mins = (elapsedSeconds % 3600) / 60
-                        val secs = elapsedSeconds % 60
-                        val timeStr = if (hrs > 0) String.format(Locale.US, "%02d:%02d:%02d", hrs, mins, secs)
-                        else String.format(Locale.US, "%02d:%02d", mins, secs)
-                        Text(
-                            text = timeStr,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
-                        )
-                    }
-
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Speed, contentDescription = null, tint = TextMuted, modifier = Modifier.size(13.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(text = "Pace TB", style = MaterialTheme.typography.labelSmall, color = TextMuted)
-                        }
-                        Spacer(modifier = Modifier.height(2.dp))
-                        val paceStr = if (avgPaceSecPerKm in 1..3600) {
-                            val pm = avgPaceSecPerKm / 60
-                            val ps = avgPaceSecPerKm % 60
-                            String.format(Locale.US, "%d'%02d\"", pm, ps)
-                        } else "--'--\""
-                        Text(
-                            text = paceStr,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = EmeraldPrimary
-                        )
-                    }
-
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.LocalFireDepartment, contentDescription = null, tint = OrangeBurn, modifier = Modifier.size(13.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(text = "Calo", style = MaterialTheme.typography.labelSmall, color = TextMuted)
-                        }
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "${caloriesBurned.toInt()} kcal",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = OrangeBurn
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // CONTROLS
-                if (!isRunning) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Button(
-                            onClick = {
-                                isRunning = true
-                                isPaused = false
-                                elapsedSeconds = 0L
-                                manualDistanceMeters = 0.0
-                                zombieState = zombieState.copy(distanceMeters = 80.0)
-                                locationTracker.reset()
-
-                                if (zombieState.isEnabled) {
-                                    voiceCoach.speakZombieStart(zombieState.difficulty.title)
-                                }
-
-                                if (locationTracker.hasPermission()) {
-                                    locationTracker.startTracking()
-                                } else {
-                                    permissionLauncher.launch(
-                                        arrayOf(
-                                            Manifest.permission.ACCESS_FINE_LOCATION,
-                                            Manifest.permission.ACCESS_COARSE_LOCATION
-                                        )
-                                    )
-                                }
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(50.dp),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (zombieState.isEnabled) DangerRed else CyanRun
-                            )
-                        ) {
-                            Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null, tint = Color.White)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (zombieState.isEnabled) "CHẠY TRỐN ZOMBIE!" else "Bắt đầu chạy GPS",
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        Button(
-                            onClick = { showManualDialog = true },
-                            modifier = Modifier.height(50.dp),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = DarkBackground)
-                        ) {
-                            Icon(imageVector = Icons.Default.Add, contentDescription = null, tint = TextSecondary)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(text = "Nhập tay", color = TextSecondary)
-                        }
-                    }
-                } else {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Button(
-                            onClick = { isPaused = !isPaused },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(50.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isPaused) EmeraldPrimary else CardSurface
-                            )
-                        ) {
-                            Icon(
-                                imageVector = if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
-                                contentDescription = null,
-                                tint = if (isPaused) DarkBackground else TextPrimary
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (isPaused) "Tiếp tục" else "Tạm dừng",
-                                color = if (isPaused) DarkBackground else TextPrimary,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        Button(
-                            onClick = {
-                                isRunning = false
-                                isPaused = false
-                                locationTracker.stopTracking()
-
-                                if (distanceKm > 0.05 || elapsedSeconds > 30) {
-                                    val session = RunSession(
-                                        startTime = System.currentTimeMillis(),
-                                        durationSeconds = elapsedSeconds,
-                                        distanceMeters = totalDistanceMeters,
-                                        caloriesBurned = caloriesBurned,
-                                        averagePaceSecondsPerKm = avgPaceSecPerKm,
-                                        isGpsTracked = gpsDistanceMeters > 0,
-                                        notes = if (zombieState.isEnabled) "Chạy sinh tồn Zombie (${zombieState.caughtCount} lần bị bắt)" else "Chạy bộ ngoài trời"
-                                    )
-                                    CoroutineScope(Dispatchers.IO).launch {
-                                        repository.addRunSession(session)
-                                    }
-                                }
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(50.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = OrangeBurn)
-                        ) {
-                            Icon(imageVector = Icons.Default.Stop, contentDescription = null, tint = DarkBackground)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(text = "Kết thúc & Lưu", color = DarkBackground, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         // RUN HISTORY LIST
         Text(
@@ -712,18 +714,35 @@ fun RunScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            items(runs) { run ->
-                RunHistoryItem(run = run)
+        if (runs.isEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = CardSurface),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Chưa có buổi chạy nào. Hãy nhấn 'BẮT ĐẦU CHẠY' để ghi nhận buổi chạy đầu tiên!",
+                        fontSize = 13.sp,
+                        color = TextMuted,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
             }
-
-            item {
-                Spacer(modifier = Modifier.height(80.dp))
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                runs.forEach { run ->
+                    RunHistoryItem(run = run)
+                }
             }
         }
+
+        Spacer(modifier = Modifier.height(90.dp))
     }
 
     // MANUAL ENTRY DIALOG
