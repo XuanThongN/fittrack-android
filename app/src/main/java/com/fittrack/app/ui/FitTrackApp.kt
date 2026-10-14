@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -22,6 +25,8 @@ import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.MonitorWeight
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -39,13 +44,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.fittrack.app.data.db.FitTrackRepository
 import com.fittrack.app.data.model.WorkoutPlan
+import com.fittrack.app.service.RunningSessionManager
 import com.fittrack.app.ui.screens.DashboardScreen
 import com.fittrack.app.ui.screens.ProfileScreen
 import com.fittrack.app.ui.screens.RunScreen
@@ -54,6 +63,7 @@ import com.fittrack.app.ui.screens.WorkoutScreen
 import com.fittrack.app.ui.screens.WorkoutSessionPlayerScreen
 import com.fittrack.app.ui.theme.CardSurface
 import com.fittrack.app.ui.theme.DarkBackground
+import com.fittrack.app.ui.theme.DangerRed
 import com.fittrack.app.ui.theme.EmeraldPrimary
 import com.fittrack.app.ui.theme.TextMuted
 import com.fittrack.app.ui.theme.TextPrimary
@@ -61,6 +71,7 @@ import com.fittrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 enum class Screen(val title: String, val icon: ImageVector) {
     DASHBOARD("Tổng quan", Icons.Default.Dashboard),
@@ -71,13 +82,20 @@ enum class Screen(val title: String, val icon: ImageVector) {
 }
 
 @Composable
-fun FitTrackApp(repository: FitTrackRepository) {
-    var currentScreen by remember { mutableStateOf(Screen.DASHBOARD) }
+fun FitTrackApp(
+    repository: FitTrackRepository,
+    initialScreen: Screen = Screen.DASHBOARD
+) {
+    var currentScreen by remember { mutableStateOf(initialScreen) }
     var activeWorkoutPlan by remember { mutableStateOf<WorkoutPlan?>(null) }
     var showAddWeightDialog by remember { mutableStateOf(false) }
 
     val weights by repository.weightEntries.collectAsState()
     val latestWeight = weights.firstOrNull()?.weightKg ?: 70.0
+
+    // Monitor global running session state
+    val isRunActive by RunningSessionManager.isRunning.collectAsState()
+    val runElapsedSec by RunningSessionManager.elapsedSeconds.collectAsState()
 
     // FULL SCREEN WORKOUT PLAYER OVERLAY
     if (activeWorkoutPlan != null) {
@@ -98,14 +116,29 @@ fun FitTrackApp(repository: FitTrackRepository) {
             ) {
                 Screen.values().forEach { screen ->
                     val isSelected = currentScreen == screen
+                    val isThisRunScreen = screen == Screen.RUN
+
                     NavigationBarItem(
                         selected = isSelected,
                         onClick = { currentScreen = screen },
                         icon = {
-                            Icon(
-                                imageVector = screen.icon,
-                                contentDescription = screen.title
-                            )
+                            BadgedBox(
+                                badge = {
+                                    if (isThisRunScreen && isRunActive) {
+                                        Badge(
+                                            containerColor = DangerRed,
+                                            contentColor = Color.White
+                                        ) {
+                                            Text(text = "LIVE", fontSize = 9.sp, fontWeight = FontWeight.ExtraBold)
+                                        }
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = screen.icon,
+                                    contentDescription = screen.title
+                                )
+                            }
                         },
                         label = {
                             Text(
@@ -115,10 +148,10 @@ fun FitTrackApp(repository: FitTrackRepository) {
                         },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = DarkBackground,
-                            selectedTextColor = EmeraldPrimary,
-                            indicatorColor = EmeraldPrimary,
-                            unselectedIconColor = TextMuted,
-                            unselectedTextColor = TextMuted
+                            selectedTextColor = if (isThisRunScreen && isRunActive) DangerRed else EmeraldPrimary,
+                            indicatorColor = if (isThisRunScreen && isRunActive) DangerRed else EmeraldPrimary,
+                            unselectedIconColor = if (isThisRunScreen && isRunActive) DangerRed else TextMuted,
+                            unselectedTextColor = if (isThisRunScreen && isRunActive) DangerRed else TextMuted
                         )
                     )
                 }
@@ -131,83 +164,111 @@ fun FitTrackApp(repository: FitTrackRepository) {
                 .background(DarkBackground)
                 .padding(paddingValues)
         ) {
-            when (currentScreen) {
-                Screen.DASHBOARD -> DashboardScreen(
-                    repository = repository,
-                    onNavigateToWeight = { currentScreen = Screen.WEIGHT },
-                    onNavigateToWorkout = { currentScreen = Screen.WORKOUT },
-                    onNavigateToRun = { currentScreen = Screen.RUN },
-                    onOpenAddWeightDialog = { showAddWeightDialog = true }
-                )
-                Screen.WEIGHT -> WeightScreen(
-                    repository = repository,
-                    onOpenAddWeightDialog = { showAddWeightDialog = true }
-                )
-                Screen.WORKOUT -> WorkoutScreen(
-                    repository = repository,
-                    onStartWorkout = { plan -> activeWorkoutPlan = plan }
-                )
-                Screen.RUN -> RunScreen(
-                    repository = repository
-                )
-                Screen.PROFILE -> ProfileScreen(
-                    repository = repository
-                )
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Persistent Active Run Banner (Visible on other tabs so user never loses track!)
+                if (isRunActive && currentScreen != Screen.RUN) {
+                    val distKm = RunningSessionManager.getTotalDistanceMeters() / 1000.0
+                    val timeStr = String.format(Locale.US, "%02d:%02d", runElapsedSec / 60, runElapsedSec % 60)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(DangerRed.copy(alpha = 0.95f))
+                            .clickable { currentScreen = Screen.RUN }
+                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(text = "🏃", fontSize = 16.sp)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Buổi chạy đang tiếp tục: ${String.format(Locale.US, "%.2f km", distKm)} • $timeStr",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Text(
+                                text = "Mở lại ➔",
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    when (currentScreen) {
+                        Screen.DASHBOARD -> DashboardScreen(
+                            repository = repository,
+                            onNavigateToWeight = { currentScreen = Screen.WEIGHT },
+                            onNavigateToWorkout = { currentScreen = Screen.WORKOUT },
+                            onNavigateToRun = { currentScreen = Screen.RUN },
+                            onOpenAddWeightDialog = { showAddWeightDialog = true }
+                        )
+                        Screen.WEIGHT -> WeightScreen(
+                            repository = repository,
+                            onOpenAddWeightDialog = { showAddWeightDialog = true }
+                        )
+                        Screen.WORKOUT -> WorkoutScreen(
+                            repository = repository,
+                            onStartWorkout = { plan -> activeWorkoutPlan = plan }
+                        )
+                        Screen.RUN -> RunScreen(
+                            repository = repository
+                        )
+                        Screen.PROFILE -> ProfileScreen(
+                            repository = repository
+                        )
+                    }
+                }
             }
         }
     }
 
     // GLOBAL ADD WEIGHT DIALOG
     if (showAddWeightDialog) {
-        var inputWeight by remember { mutableStateOf(String.format("%.1f", latestWeight).replace(',', '.')) }
-        var inputNote by remember { mutableStateOf("") }
-        var inputBodyFat by remember { mutableStateOf("") }
+        var weightInput by remember { mutableStateOf(latestWeight.toString()) }
+        var noteInput by remember { mutableStateOf("") }
 
         AlertDialog(
             onDismissRequest = { showAddWeightDialog = false },
-            containerColor = CardSurface,
             title = {
                 Text(
-                    text = "Ghi Nhận Cân Nặng",
-                    style = MaterialTheme.typography.titleLarge,
+                    text = "Ghi Nhận Cân Nặng Hôm Nay",
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary
                 )
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        text = "Hãy ghi cân nặng vào cùng một thời điểm mỗi ngày (ví dụ: buổi sáng sau khi ngủ dậy) để có số liệu chính xác nhất:",
-                        style = MaterialTheme.typography.bodyMedium,
+                        text = "Nhập số cân nặng mới nhất để cập nhật tiến độ và chỉ số BMI:",
+                        style = MaterialTheme.typography.bodySmall,
                         color = TextSecondary
                     )
 
                     OutlinedTextField(
-                        value = inputWeight,
-                        onValueChange = { inputWeight = it },
-                        label = { Text("Số cân (kg) *") },
-                        placeholder = { Text("Ví dụ: 68.5") },
+                        value = weightInput,
+                        onValueChange = { weightInput = it },
+                        label = { Text("Cân nặng (kg)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
 
                     OutlinedTextField(
-                        value = inputNote,
-                        onValueChange = { inputNote = it },
-                        label = { Text("Ghi chú (tùy chọn)") },
-                        placeholder = { Text("Ví dụ: Buổi sáng trước khi ăn") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    OutlinedTextField(
-                        value = inputBodyFat,
-                        onValueChange = { inputBodyFat = it },
-                        label = { Text("% Mỡ cơ thể (tùy chọn)") },
-                        placeholder = { Text("Ví dụ: 19.5") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true,
+                        value = noteInput,
+                        onValueChange = { noteInput = it },
+                        label = { Text("Ghi chú (Tùy chọn)") },
+                        placeholder = { Text("Ví dụ: Đo lúc sáng sớm sau khi ngủ dậy") },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -215,23 +276,25 @@ fun FitTrackApp(repository: FitTrackRepository) {
             confirmButton = {
                 Button(
                     onClick = {
-                        val w = inputWeight.toDoubleOrNull()
-                        if (w != null && w > 20.0 && w < 300.0) {
-                            val bf = inputBodyFat.toDoubleOrNull()
+                        val w = weightInput.toDoubleOrNull()
+                        if (w != null && w in 30.0..300.0) {
                             CoroutineScope(Dispatchers.IO).launch {
-                                repository.addWeight(weightKg = w, note = inputNote, bodyFat = bf)
+                                repository.addWeight(
+                                    weightKg = w,
+                                    note = noteInput.ifBlank { "Cập nhật nhanh" }
+                                )
                             }
                             showAddWeightDialog = false
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary)
                 ) {
-                    Text(text = "Lưu Cân Nặng", color = DarkBackground, fontWeight = FontWeight.Bold)
+                    Text("Lưu Cân Nặng", color = DarkBackground, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showAddWeightDialog = false }) {
-                    Text(text = "Hủy", color = TextSecondary)
+                    Text("Hủy", color = TextMuted)
                 }
             }
         )

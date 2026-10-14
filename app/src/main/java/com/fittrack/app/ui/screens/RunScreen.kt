@@ -1,11 +1,7 @@
 package com.fittrack.app.ui.screens
 
 import android.Manifest
-import android.content.Context
 import android.os.Build
-import android.os.VibrationEffect
-import android.os.Vibrator
-import android.os.VibratorManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -52,14 +48,14 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
-import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,10 +69,8 @@ import androidx.compose.ui.unit.sp
 import com.fittrack.app.data.db.FitTrackRepository
 import com.fittrack.app.data.model.RunSession
 import com.fittrack.app.data.model.ZombieAlertLevel
-import com.fittrack.app.data.model.ZombieChaseState
 import com.fittrack.app.data.model.ZombieDifficulty
-import com.fittrack.app.service.FitTrackVoiceCoach
-import com.fittrack.app.service.LocationTracker
+import com.fittrack.app.service.RunningSessionManager
 import com.fittrack.app.ui.components.RealStreetZombieMapView
 import com.fittrack.app.ui.components.ZombieRadarMap
 import com.fittrack.app.ui.theme.CardSurface
@@ -89,9 +83,6 @@ import com.fittrack.app.ui.theme.OrangeBurn
 import com.fittrack.app.ui.theme.TextMuted
 import com.fittrack.app.ui.theme.TextPrimary
 import com.fittrack.app.ui.theme.TextSecondary
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -100,9 +91,12 @@ fun RunScreen(
     repository: FitTrackRepository
 ) {
     val context = LocalContext.current
-    val locationTracker = remember { LocationTracker(context) }
-    val voiceCoach = remember { FitTrackVoiceCoach(context) }
-    var isMuted by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+
+    // Initialize Tracker in Singleton Manager
+    LaunchedEffect(Unit) {
+        RunningSessionManager.initTracker(context)
+    }
 
     val profile by repository.userProfile.collectAsState()
     val weights by repository.weightEntries.collectAsState()
@@ -110,15 +104,20 @@ fun RunScreen(
 
     val currentWeightKg = weights.firstOrNull()?.weightKg ?: profile.initialWeightKg
 
-    var isRunning by remember { mutableStateOf(false) }
-    var isPaused by remember { mutableStateOf(false) }
-    var elapsedSeconds by remember { mutableLongStateOf(0L) }
-    var manualDistanceMeters by remember { mutableDoubleStateOf(0.0) }
+    // Collect global persistent running session states
+    val isRunning by RunningSessionManager.isRunning.collectAsState()
+    val isPaused by RunningSessionManager.isPaused.collectAsState()
+    val elapsedSeconds by RunningSessionManager.elapsedSeconds.collectAsState()
+    val manualDistanceMeters by RunningSessionManager.manualDistanceMeters.collectAsState()
+    val zombieState by RunningSessionManager.zombieState.collectAsState()
+    val mapMode by RunningSessionManager.mapMode.collectAsState()
+    val isMuted by RunningSessionManager.isMuted.collectAsState()
 
-    val gpsDistanceMeters by locationTracker.distanceMeters.collectAsState()
-    val pathPoints by locationTracker.pathPoints.collectAsState()
-    val currentLocation by locationTracker.currentLocation.collectAsState()
-    val currentBearing by locationTracker.currentBearing.collectAsState()
+    val locationTracker = RunningSessionManager.locationTracker
+    val gpsDistanceMeters by locationTracker?.distanceMeters?.collectAsState() ?: remember { mutableDoubleStateOf(0.0) }
+    val pathPoints by locationTracker?.pathPoints?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
+    val currentLocation by locationTracker?.currentLocation?.collectAsState() ?: remember { mutableStateOf(null) }
+    val currentBearing by locationTracker?.currentBearing?.collectAsState() ?: remember { mutableFloatStateOf(0f) }
 
     val totalDistanceMeters = if (gpsDistanceMeters > 0) gpsDistanceMeters else manualDistanceMeters
     val distanceKm = totalDistanceMeters / 1000.0
@@ -136,29 +135,6 @@ fun RunScreen(
     val avgPaceSecPerKm = if (distanceKm > 0.05) (elapsedSeconds / distanceKm).toLong() else 0L
 
     var showManualDialog by remember { mutableStateOf(false) }
-    var mapMode by remember { mutableStateOf("street") }
-
-    // ZOMBIE CHASE STATE
-    var zombieState by remember { mutableStateOf(ZombieChaseState(isEnabled = true, distanceMeters = 80.0)) }
-    var lastZombieWarningSec by remember { mutableLongStateOf(0L) }
-
-    fun triggerHaptic(durationMs: Long = 200) {
-        try {
-            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
-                vm?.defaultVibrator
-            } else {
-                @Suppress("DEPRECATION")
-                context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                vibrator?.vibrate(VibrationEffect.createOneShot(durationMs, VibrationEffect.DEFAULT_AMPLITUDE))
-            } else {
-                @Suppress("DEPRECATION")
-                vibrator?.vibrate(durationMs)
-            }
-        } catch (_: Exception) {}
-    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -166,87 +142,38 @@ fun RunScreen(
         val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
         val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
         if (fineGranted || coarseGranted) {
-            locationTracker.startListening()
+            locationTracker?.startListening()
             if (isRunning) {
-                locationTracker.startTracking()
+                locationTracker?.startTracking()
             }
         }
     }
 
-    // Automatically request permissions and start GPS listening on screen enter
-    LaunchedEffect(Unit) {
-        if (locationTracker.hasPermission()) {
-            locationTracker.startListening()
-        } else {
-            permissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
-                )
+    // Automatically check permissions on screen enter
+    LaunchedEffect(locationTracker) {
+        if (locationTracker?.hasPermission() == false) {
+            val perms = mutableListOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
             )
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                perms.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            permissionLauncher.launch(perms.toTypedArray())
+        } else {
+            locationTracker?.startListening()
         }
     }
 
-    DisposableEffect(locationTracker) {
-        onDispose {
-            locationTracker.destroy()
-        }
-    }
-
-    // RUNNING & ZOMBIE CHASE LOOP (Runs every second)
-    LaunchedEffect(isRunning, isPaused, zombieState.isEnabled) {
-        var prevDistance = totalDistanceMeters
-
-        while (isRunning && !isPaused) {
-            delay(1000L)
-            elapsedSeconds++
-
-            if (zombieState.isEnabled) {
-                val runnerDistDelta = (totalDistanceMeters - prevDistance).coerceAtLeast(0.0)
-                prevDistance = totalDistanceMeters
-
-                // Zombie speed in meters per second
-                val zombieSpeedMps = (zombieState.difficulty.speedKmh * 1000.0) / 3600.0
-
-                // If runner is slower than zombie, distance decreases; if faster, distance increases
-                val netDistanceDelta = runnerDistDelta - zombieSpeedMps
-                val updatedDist = (zombieState.distanceMeters + netDistanceDelta).coerceIn(0.0, 150.0)
-
-                val newAlertLevel = when {
-                    updatedDist <= 0.0 -> ZombieAlertLevel.CAUGHT
-                    updatedDist < 30.0 -> ZombieAlertLevel.DANGER
-                    updatedDist < 60.0 -> ZombieAlertLevel.WARNING
-                    else -> ZombieAlertLevel.SAFE
-                }
-
-                // Audio & Vibrate Triggers based on Zombie closeness
-                if (newAlertLevel == ZombieAlertLevel.DANGER && elapsedSeconds - lastZombieWarningSec > 6) {
-                    triggerHaptic(400)
-                    voiceCoach.speakZombieApproaching(updatedDist.toInt())
-                    lastZombieWarningSec = elapsedSeconds
-                } else if (newAlertLevel == ZombieAlertLevel.CAUGHT) {
-                    triggerHaptic(800)
-                    voiceCoach.speakZombieCaught()
-                    // Push zombie back 45m so the player can sprint away!
-                    zombieState = zombieState.copy(
-                        distanceMeters = 45.0,
-                        alertLevel = ZombieAlertLevel.DANGER,
-                        caughtCount = zombieState.caughtCount + 1
-                    )
-                } else {
-                    zombieState = zombieState.copy(
-                        distanceMeters = updatedDist,
-                        alertLevel = newAlertLevel
-                    )
+    // Handle Stop Action requested from Ongoing Notification
+    LaunchedEffect(Unit) {
+        RunningSessionManager.stopRequested.collect {
+            if (isRunning) {
+                coroutineScope.launch {
+                    val notes = if (zombieState.isEnabled) "Chạy sinh tồn Zombie (${zombieState.caughtCount} lần bị bắt)" else "Chạy bộ ngoài trời"
+                    RunningSessionManager.stopAndSaveRun(context, repository, currentWeightKg, notes)
                 }
             }
-        }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            locationTracker.stopTracking()
-            voiceCoach.destroy()
         }
     }
 
@@ -292,10 +219,7 @@ fun RunScreen(
                 }
 
                 // Sound Mute/Unmute
-                IconButton(onClick = {
-                    isMuted = !isMuted
-                    voiceCoach.isMuted = isMuted
-                }) {
+                IconButton(onClick = { RunningSessionManager.toggleMute() }) {
                     Icon(
                         imageVector = if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
                         contentDescription = "Âm thanh",
@@ -321,7 +245,7 @@ fun RunScreen(
                     .weight(1f)
                     .clip(RoundedCornerShape(8.dp))
                     .background(if (mapMode == "street") CyanRun else Color.Transparent)
-                    .clickable { mapMode = "street" }
+                    .clickable { RunningSessionManager.setMapMode("street") }
                     .padding(vertical = 6.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -342,7 +266,7 @@ fun RunScreen(
                     .weight(1f)
                     .clip(RoundedCornerShape(8.dp))
                     .background(if (mapMode == "radar") DangerRed else Color.Transparent)
-                    .clickable { mapMode = "radar" }
+                    .clickable { RunningSessionManager.setMapMode("radar") }
                     .padding(vertical = 6.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -392,26 +316,17 @@ fun RunScreen(
         if (!isRunning) {
             Button(
                 onClick = {
-                    isRunning = true
-                    isPaused = false
-                    elapsedSeconds = 0L
-                    manualDistanceMeters = 0.0
-                    zombieState = zombieState.copy(distanceMeters = 80.0, alertLevel = ZombieAlertLevel.SAFE)
-                    locationTracker.reset()
-
-                    if (zombieState.isEnabled) {
-                        voiceCoach.speakZombieStart(zombieState.difficulty.title)
-                    }
-
-                    if (locationTracker.hasPermission()) {
-                        locationTracker.startTracking()
+                    if (locationTracker?.hasPermission() == true) {
+                        RunningSessionManager.startRun(context, zombieState.isEnabled, zombieState.difficulty)
                     } else {
-                        permissionLauncher.launch(
-                            arrayOf(
-                                Manifest.permission.ACCESS_FINE_LOCATION,
-                                Manifest.permission.ACCESS_COARSE_LOCATION
-                            )
+                        val perms = mutableListOf(
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION
                         )
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            perms.add(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                        permissionLauncher.launch(perms.toTypedArray())
                     }
                 },
                 modifier = Modifier
@@ -443,7 +358,13 @@ fun RunScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Button(
-                    onClick = { isPaused = !isPaused },
+                    onClick = {
+                        if (isPaused) {
+                            RunningSessionManager.resumeRun(context)
+                        } else {
+                            RunningSessionManager.pauseRun(context)
+                        }
+                    },
                     modifier = Modifier
                         .weight(1f)
                         .height(52.dp),
@@ -468,23 +389,9 @@ fun RunScreen(
 
                 Button(
                     onClick = {
-                        isRunning = false
-                        isPaused = false
-                        locationTracker.stopTracking()
-
-                        if (distanceKm > 0.05 || elapsedSeconds > 30) {
-                            val session = RunSession(
-                                startTime = System.currentTimeMillis(),
-                                durationSeconds = elapsedSeconds,
-                                distanceMeters = totalDistanceMeters,
-                                caloriesBurned = caloriesBurned,
-                                averagePaceSecondsPerKm = avgPaceSecPerKm,
-                                isGpsTracked = gpsDistanceMeters > 0,
-                                notes = if (zombieState.isEnabled) "Chạy sinh tồn Zombie (${zombieState.caughtCount} lần bị bắt)" else "Chạy bộ ngoài trời"
-                            )
-                            CoroutineScope(Dispatchers.IO).launch {
-                                repository.addRunSession(session)
-                            }
+                        coroutineScope.launch {
+                            val notes = if (zombieState.isEnabled) "Chạy sinh tồn Zombie (${zombieState.caughtCount} lần bị bắt)" else "Chạy bộ ngoài trời"
+                            RunningSessionManager.stopAndSaveRun(context, repository, currentWeightKg, notes)
                         }
                     },
                     modifier = Modifier
@@ -528,14 +435,14 @@ fun RunScreen(
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = "KM",
-                        fontSize = 16.sp,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextMuted,
                         modifier = Modifier.padding(bottom = 6.dp)
                     )
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 // Stats Row (Time, Pace, Calories)
                 Row(
@@ -642,10 +549,7 @@ fun RunScreen(
                     Switch(
                         checked = zombieState.isEnabled,
                         onCheckedChange = { checked ->
-                            zombieState = zombieState.copy(isEnabled = checked, distanceMeters = 80.0)
-                            if (checked) {
-                                voiceCoach.speakZombieStart(zombieState.difficulty.title)
-                            }
+                            RunningSessionManager.setZombieEnabled(checked)
                         },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = DangerRed,
@@ -689,7 +593,7 @@ fun RunScreen(
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(if (isSelected) DangerRed else DarkBackground)
                                     .clickable {
-                                        zombieState = zombieState.copy(difficulty = diff)
+                                        RunningSessionManager.setZombieDifficulty(diff)
                                     }
                                     .padding(vertical = 6.dp),
                                 contentAlignment = Alignment.Center
@@ -740,103 +644,39 @@ fun RunScreen(
                 }
             }
         } else {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 runs.forEach { run ->
                     RunHistoryItem(run = run)
                 }
             }
         }
 
+        // Bottom space so nothing is clipped by navigation bar
         Spacer(modifier = Modifier.height(90.dp))
     }
 
-    // MANUAL ENTRY DIALOG
+    // Manual Run Add Dialog
     if (showManualDialog) {
-        var inputKm by remember { mutableStateOf("") }
-        var inputMinutes by remember { mutableStateOf("") }
-        var inputNote by remember { mutableStateOf("Chạy máy phòng gym") }
+        ManualRunDialog(
+            onDismiss = { showManualDialog = false },
+            onConfirm = { distKm, durMin ->
+                val distMeters = distKm * 1000.0
+                val durSeconds = (durMin * 60).toLong()
+                val calories = (currentWeightKg * distKm * 1.036).coerceAtLeast(0.0)
+                val pace = if (distKm > 0) (durSeconds / distKm).toLong() else 0L
 
-        AlertDialog(
-            onDismissRequest = { showManualDialog = false },
-            containerColor = CardSurface,
-            title = {
-                Text(
-                    text = "Ghi Nhận Buổi Chạy Thủ Công",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
+                val manualSession = RunSession(
+                    durationSeconds = durSeconds,
+                    distanceMeters = distMeters,
+                    caloriesBurned = calories,
+                    averagePaceSecondsPerKm = pace,
+                    isGpsTracked = false,
+                    notes = "Nhập tay thủ công (Máy chạy bộ)"
                 )
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "Thích hợp khi chạy trên máy chạy bộ (Treadmill) hoặc không dùng GPS:",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextSecondary
-                    )
-
-                    OutlinedTextField(
-                        value = inputKm,
-                        onValueChange = { inputKm = it },
-                        label = { Text("Quãng đường (km) *") },
-                        placeholder = { Text("Ví dụ: 5.0") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    OutlinedTextField(
-                        value = inputMinutes,
-                        onValueChange = { inputMinutes = it },
-                        label = { Text("Thời gian (phút) *") },
-                        placeholder = { Text("Ví dụ: 30") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    OutlinedTextField(
-                        value = inputNote,
-                        onValueChange = { inputNote = it },
-                        label = { Text("Ghi chú") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                coroutineScope.launch {
+                    repository.addRunSession(manualSession)
                 }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val km = inputKm.toDoubleOrNull() ?: 0.0
-                        val mins = inputMinutes.toLongOrNull() ?: 0L
-                        if (km > 0 && mins > 0) {
-                            val durationSec = mins * 60
-                            val pace = (durationSec / km).toLong()
-                            val cal = currentWeightKg * km * 1.036
-                            val session = RunSession(
-                                startTime = System.currentTimeMillis(),
-                                durationSeconds = durationSec,
-                                distanceMeters = km * 1000.0,
-                                caloriesBurned = cal,
-                                averagePaceSecondsPerKm = pace,
-                                isGpsTracked = false,
-                                notes = inputNote
-                            )
-                            CoroutineScope(Dispatchers.IO).launch {
-                                repository.addRunSession(session)
-                            }
-                            showManualDialog = false
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = CyanRun)
-                ) {
-                    Text("Lưu buổi chạy", color = DarkBackground, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showManualDialog = false }) {
-                    Text("Hủy", color = TextSecondary)
-                }
+                showManualDialog = false
             }
         )
     }
@@ -847,7 +687,7 @@ fun RunHistoryItem(run: RunSession) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = CardSurface),
-        shape = RoundedCornerShape(16.dp)
+        shape = RoundedCornerShape(14.dp)
     ) {
         Row(
             modifier = Modifier
@@ -861,55 +701,98 @@ fun RunHistoryItem(run: RunSession) {
                     modifier = Modifier
                         .size(44.dp)
                         .clip(CircleShape)
-                        .background(if (run.notes.contains("Zombie")) DangerRed.copy(alpha = 0.15f) else CyanRun.copy(alpha = 0.15f)),
+                        .background(if (run.notes.contains("Zombie")) DangerRed.copy(alpha = 0.2f) else CyanRun.copy(alpha = 0.2f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = if (run.notes.contains("Zombie")) "🧟" else "🏃",
-                        fontSize = 20.sp
+                    Icon(
+                        imageVector = Icons.Default.DirectionsRun,
+                        contentDescription = null,
+                        tint = if (run.notes.contains("Zombie")) DangerRed else CyanRun,
+                        modifier = Modifier.size(24.dp)
                     )
                 }
 
                 Spacer(modifier = Modifier.width(12.dp))
 
                 Column {
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        Text(
-                            text = run.distanceKmFormatted(),
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = run.durationFormatted(),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextSecondary,
-                            modifier = Modifier.padding(bottom = 2.dp)
-                        )
-                    }
-
                     Text(
-                        text = "${run.getFormattedDate()} • Pace: ${run.paceFormatted()}",
+                        text = run.getFormattedDate(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                    Text(
+                        text = if (run.notes.isNotBlank()) run.notes else if (run.isGpsTracked) "GPS Ngoài trời" else "Nhập tay",
                         style = MaterialTheme.typography.labelSmall,
-                        color = TextMuted
+                        color = TextSecondary
                     )
                 }
             }
 
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    text = run.caloriesFormatted(),
+                    text = run.distanceKmFormatted(),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = OrangeBurn
+                    color = CyanLight
                 )
                 Text(
-                    text = if (run.notes.contains("Zombie")) "Zombie Run" else if (run.isGpsTracked) "GPS Run" else "Treadmill",
+                    text = "${run.durationFormatted()} • ${run.caloriesFormatted()}",
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (run.notes.contains("Zombie")) DangerRed else TextMuted
+                    color = TextMuted
                 )
             }
         }
     }
+}
+
+@Composable
+fun ManualRunDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (distKm: Double, durMin: Double) -> Unit
+) {
+    var distText by remember { mutableStateOf("") }
+    var durText by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = "Nhập Tay Buổi Chạy", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = distText,
+                    onValueChange = { distText = it },
+                    label = { Text("Quãng đường (km)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = durText,
+                    onValueChange = { durText = it },
+                    label = { Text("Thời gian (phút)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val d = distText.toDoubleOrNull() ?: 0.0
+                    val t = durText.toDoubleOrNull() ?: 0.0
+                    if (d > 0 && t > 0) {
+                        onConfirm(d, t)
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = CyanRun)
+            ) {
+                Text("Lưu Buổi Chạy", color = DarkBackground, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Hủy", color = TextMuted)
+            }
+        }
+    )
 }

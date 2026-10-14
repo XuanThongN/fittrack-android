@@ -16,10 +16,18 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         repository = FitTrackRepository(this)
 
+        val target = intent?.getStringExtra("navigate_to")
+        val initialScreen = if (target == "RUN") com.fittrack.app.ui.Screen.RUN else com.fittrack.app.ui.Screen.DASHBOARD
+
         setContent {
             FitTrackTheme {
-                FitTrackApp(repository = repository)
+                FitTrackApp(repository = repository, initialScreen = initialScreen)
             }
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
     }
 }
